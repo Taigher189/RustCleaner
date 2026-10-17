@@ -1,0 +1,17 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+*.pdb
+
+# Local runtime backups and temporary exports
+/registry_backups/
+/.rustcleaner_wipe_tmp/
+
+# Local standalone binaries in root (keep releases in GitHub Releases)
+/*.exe
+
+# IDE & OS metadata
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

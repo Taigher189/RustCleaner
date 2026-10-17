@@ -1,0 +1,33 @@
+[package]
+name = "rustcleaner"
+version = "0.1.0-alpha"
+edition = "2021"
+description = "[MEGA ALPHA] Lightweight, standalone Windows system cleaner, registry maintenance utility with automatic .reg backup, startup/uninstaller manager, and low-level free space wiper written in Rust."
+authors = ["Taigher189"]
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/Taigher189/RustCleaner"
+keywords = ["cleaner", "windows", "registry", "system-utility", "egui"]
+categories = ["command-line-utilities", "gui", "os::windows-apis"]
+
+[dependencies]
+eframe = "0.31"
+egui = "0.31"
+rayon = "1.10"
+walkdir = "2.5"
+winreg = "0.55"
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Console",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Storage_FileSystem",
+] }
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = "0.4"
+rand = "0.8"
+glob = "0.3"
