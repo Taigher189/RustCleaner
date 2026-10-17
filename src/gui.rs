@@ -1,20 +1,19 @@
 //! UI/UX Pro Max Desktop GUI for RustCleaner built with `eframe` / `egui`.
 //!
-//! Designed and audited with UI/UX Pro Max Design System rules:
-//! - Style: Dark Mode (OLED) + Bento KPI Grid + Technical Developer/System Utility precision
-//! - Icons: 100% custom resolution-independent `egui::Painter` vector icons (1.6px consistent stroke,
-//!   zero font/emoji dependency, dedicated bounding boxes with zero text overlap)
-//! - Typography: Strict type scale + Monospace tabular numbers/versions/paths (`number-tabular`)
-//!   + tooltip disclosure for long commands/paths (`truncation-strategy`)
-//! - Accessibility: WCAG AA >= 4.5:1 normal text contrast on all dark surfaces (`TEXT_MUTED` #94A3B8),
-//!   color-never-alone status indicators (`color-not-only`), pointing-hand cursor on all interactive controls
-//! - Action Hierarchy: Distinct Primary Scan, Execute Action, Secondary, and Destructive button variants
+//! Features:
+//! - Live **Dark / Light Mode** Switcher (`ThemeMode::Dark` / `ThemeMode::Light`) with semantic
+//!   token-driven theming (`ThemePalette`) and WCAG AA/AAA contrast in both modes.
+//! - Live **7-Language Switcher** (`Italiano`, `English`, `Français`, `Español`, `Deutsch`, `中文`, `Português`)
+//!   with native Windows CJK font fallback (`msyh.ttc`) so Chinese and European glyphs render crisply.
+//! - 100% custom resolution-independent `egui::Painter` vector icons (`1.6px` stroke, zero emoji dependency,
+//!   dedicated bounding boxes with zero text overlap).
 
 use crate::cleaner::{
     analyze_all, default_clean_rules, execute_clean, format_bytes, CleanRule, CleanSummary,
     RuleGroup,
 };
 use crate::driver_updater::{install_wu_driver_updates, scan_drivers, DriverScanReport};
+use crate::i18n::Language;
 use crate::monitor::{start_realtime_watcher, RealtimeMonitorState};
 use crate::registry::{
     backup_and_fix_registry, export_reg_backup, scan_registry, RegistryCategory, RegistryIssue,
@@ -40,30 +39,85 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 // ============================================================================
-// UI/UX PRO MAX — SEMANTIC DESIGN TOKENS (Dark Mode OLED + Developer Utility)
+// UI/UX PRO MAX — DUAL-THEME SEMANTIC PALETTE (Dark OLED & Crisp Light Mode)
 // ============================================================================
-const BG_CANVAS: Color32 = Color32::from_rgb(11, 15, 25); // #0B0F19 Deep Slate Canvas
-const BG_SIDEBAR: Color32 = Color32::from_rgb(15, 23, 42); // #0F172A Slate 900 Sidebar
-const BG_HEADER: Color32 = Color32::from_rgb(13, 19, 34); // #0D1322 Top/Bottom Chrome
-const BG_CARD: Color32 = Color32::from_rgb(22, 31, 51); // #161F33 Elevated Card Surface
-const BG_CARD_SUBTLE: Color32 = Color32::from_rgb(17, 24, 39); // #111827 Recessed Row Surface
-const BG_CARD_HOVER: Color32 = Color32::from_rgb(30, 41, 59); // #1E293B Interactive Hover Surface
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThemeMode {
+    Dark,
+    Light,
+}
 
-const BORDER_SUBTLE: Color32 = Color32::from_rgb(45, 58, 79); // #2D3A4F Visible 1px Separator
-const BORDER_STRONG: Color32 = Color32::from_rgb(71, 85, 105); // #475569 Active/Focused Border
+#[derive(Debug, Clone, Copy)]
+pub struct ThemePalette {
+    pub is_dark: bool,
+    pub bg_canvas: Color32,
+    pub bg_sidebar: Color32,
+    pub bg_header: Color32,
+    pub bg_card: Color32,
+    pub bg_card_subtle: Color32,
+    pub bg_card_hover: Color32,
+    pub bg_track: Color32,
+    pub border_subtle: Color32,
+    pub border_strong: Color32,
+    pub text_primary: Color32,
+    pub text_secondary: Color32,
+    pub text_muted: Color32,
+    pub accent_rust: Color32,
+    pub accent_emerald: Color32,
+    pub accent_cyan: Color32,
+    pub accent_amber: Color32,
+    pub accent_purple: Color32,
+    pub accent_red: Color32,
+}
 
-// WCAG AA Verified Text Hierarchy (>= 4.5:1 against BG_CANVAS & BG_CARD)
-const TEXT_PRIMARY: Color32 = Color32::from_rgb(248, 250, 252); // #F8FAFC (>15:1 contrast)
-const TEXT_SECONDARY: Color32 = Color32::from_rgb(203, 213, 225); // #CBD5E1 (>10:1 contrast)
-const TEXT_MUTED: Color32 = Color32::from_rgb(148, 163, 184); // #94A3B8 (>5.5:1 WCAG AA pass)
-
-// Semantic Functional Accents
-const ACCENT_RUST: Color32 = Color32::from_rgb(249, 115, 22); // #F97316 Brand / Execute Action
-const ACCENT_EMERALD: Color32 = Color32::from_rgb(34, 197, 94); // #22C55E Safe / Verified / Active
-const ACCENT_CYAN: Color32 = Color32::from_rgb(56, 189, 248); // #38BDF8 Info / Scan / Telemetry-Free
-const ACCENT_AMBER: Color32 = Color32::from_rgb(245, 158, 11); // #F59E0B Warning / UAC / Pending
-const ACCENT_PURPLE: Color32 = Color32::from_rgb(168, 85, 247); // #A855F7 System / WHQL / Kernel
-const ACCENT_RED: Color32 = Color32::from_rgb(239, 68, 68); // #EF4444 Destructive / Stop
+impl ThemePalette {
+    pub fn for_mode(mode: ThemeMode) -> Self {
+        match mode {
+            ThemeMode::Dark => Self {
+                is_dark: true,
+                bg_canvas: Color32::from_rgb(11, 15, 25),       // #0B0F19 Deep Slate Canvas
+                bg_sidebar: Color32::from_rgb(15, 23, 42),      // #0F172A Slate 900 Sidebar
+                bg_header: Color32::from_rgb(13, 19, 34),       // #0D1322 Top/Bottom Chrome
+                bg_card: Color32::from_rgb(22, 31, 51),         // #161F33 Elevated Card Surface
+                bg_card_subtle: Color32::from_rgb(17, 24, 39),  // #111827 Recessed Row Surface
+                bg_card_hover: Color32::from_rgb(30, 41, 59),   // #1E293B Interactive Hover
+                bg_track: Color32::from_rgb(35, 45, 62),        // Progress Track
+                border_subtle: Color32::from_rgb(45, 58, 79),   // #2D3A4F 1px Separator
+                border_strong: Color32::from_rgb(71, 85, 105),  // #475569 Active Border
+                text_primary: Color32::from_rgb(248, 250, 252), // #F8FAFC (>15:1 contrast)
+                text_secondary: Color32::from_rgb(203, 213, 225), // #CBD5E1 (>10:1 contrast)
+                text_muted: Color32::from_rgb(148, 163, 184),   // #94A3B8 (>5.5:1 WCAG AA)
+                accent_rust: Color32::from_rgb(249, 115, 22),   // #F97316
+                accent_emerald: Color32::from_rgb(34, 197, 94), // #22C55E
+                accent_cyan: Color32::from_rgb(56, 189, 248),   // #38BDF8
+                accent_amber: Color32::from_rgb(245, 158, 11),  // #F59E0B
+                accent_purple: Color32::from_rgb(168, 85, 247), // #A855F7
+                accent_red: Color32::from_rgb(239, 68, 68),     // #EF4444
+            },
+            ThemeMode::Light => Self {
+                is_dark: false,
+                bg_canvas: Color32::from_rgb(241, 245, 249),    // #F1F5F9 Slate 100 Canvas
+                bg_sidebar: Color32::from_rgb(255, 255, 255),   // #FFFFFF Crisp White Sidebar
+                bg_header: Color32::from_rgb(255, 255, 255),    // #FFFFFF Crisp White Header
+                bg_card: Color32::from_rgb(255, 255, 255),      // #FFFFFF Elevated White Card
+                bg_card_subtle: Color32::from_rgb(248, 250, 252), // #F8FAFC Slate 50 Row Surface
+                bg_card_hover: Color32::from_rgb(226, 232, 240), // #E2E8F0 Slate 200 Hover
+                bg_track: Color32::from_rgb(203, 213, 225),     // #CBD5E1 Progress Track
+                border_subtle: Color32::from_rgb(203, 213, 225), // #CBD5E1 Visible Light Border
+                border_strong: Color32::from_rgb(148, 163, 184), // #94A3B8 Active Light Border
+                text_primary: Color32::from_rgb(15, 23, 42),    // #0F172A Slate 900 (>15:1)
+                text_secondary: Color32::from_rgb(51, 65, 85),  // #334155 Slate 700 (>9:1)
+                text_muted: Color32::from_rgb(71, 85, 105),     // #475569 Slate 600 (>7:1 AAA)
+                accent_rust: Color32::from_rgb(234, 88, 12),    // #EA580C Orange 600
+                accent_emerald: Color32::from_rgb(21, 128, 61), // #15803D Green 700
+                accent_cyan: Color32::from_rgb(2, 132, 199),    // #0284C7 Sky 600
+                accent_amber: Color32::from_rgb(180, 83, 9),    // #B45309 Amber 700
+                accent_purple: Color32::from_rgb(126, 34, 206), // #7E22CE Purple 700
+                accent_red: Color32::from_rgb(220, 38, 38),     // #DC2626 Red 600
+            },
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveTab {
@@ -94,6 +148,9 @@ enum VectorIcon {
     TrashDelete,
     RefreshSync,
     StopOctagon,
+    SunLight,
+    MoonDark,
+    GlobeLang,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,7 +162,10 @@ enum ButtonVariant {
 }
 
 pub struct RustCleanerApp {
-    pub theme_initialized: bool,
+    pub fonts_initialized: bool,
+    pub applied_theme: Option<ThemeMode>,
+    pub theme_mode: ThemeMode,
+    pub language: Language,
     pub active_tab: ActiveTab,
     pub is_admin: bool,
     pub status_banner: String,
@@ -169,15 +229,20 @@ impl Default for RustCleanerApp {
             .unwrap_or_else(|_| PathBuf::from("."))
             .join("registry_backups");
         let drives = list_drives();
+        let language = Language::Italian;
+        let s = language.strings();
 
         Self {
-            theme_initialized: false,
+            fonts_initialized: false,
+            applied_theme: None,
+            theme_mode: ThemeMode::Dark,
+            language,
             active_tab: ActiveTab::Cleaner,
             is_admin,
             status_banner: if is_admin {
-                "Pronto — Privilegi Amministratore (UAC) attivi • Zero Telemetria • 0 MB RAM in background.".to_string()
+                s.default_banner_admin.to_string()
             } else {
-                "Pronto — Modalità Utente Standard • Zero Telemetria. Usa 'Eleva UAC' per pulizia profonda di sistema.".to_string()
+                s.default_banner_user.to_string()
             },
             clean_rules: default_clean_rules(),
             clean_summary: None,
@@ -223,49 +288,89 @@ impl Default for RustCleanerApp {
     }
 }
 
-fn configure_pro_max_theme(ctx: &egui::Context) {
-    let mut style = (*ctx.style()).clone();
-    let mut visuals = egui::Visuals::dark();
+/// Loads Windows native CJK fallback font (`msyh.ttc` / `simsun.ttc`) so Chinese (`中文`)
+/// and all European accented glyphs render cleanly without external dependencies.
+fn configure_cjk_fonts_once(ctx: &egui::Context) {
+    let candidates = [
+        r"C:\Windows\Fonts\msyh.ttc",
+        r"C:\Windows\Fonts\simsun.ttc",
+        r"C:\Windows\Fonts\segoeui.ttf",
+    ];
+    for path in candidates {
+        if let Ok(bytes) = std::fs::read(path) {
+            let mut fonts = egui::FontDefinitions::default();
+            fonts.font_data.insert(
+                "win_cjk_fallback".to_owned(),
+                egui::FontData::from_owned(bytes).into(),
+            );
+            if let Some(fam) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+                fam.push("win_cjk_fallback".to_owned());
+            }
+            if let Some(fam) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
+                fam.push("win_cjk_fallback".to_owned());
+            }
+            ctx.set_fonts(fonts);
+            break;
+        }
+    }
+}
 
-    visuals.panel_fill = BG_CANVAS;
-    visuals.window_fill = BG_CARD;
-    visuals.extreme_bg_color = Color32::from_rgb(8, 11, 19);
-    visuals.faint_bg_color = BG_CARD_SUBTLE;
-    visuals.override_text_color = Some(TEXT_PRIMARY);
+fn apply_pro_max_theme(ctx: &egui::Context, mode: ThemeMode) {
+    let pal = ThemePalette::for_mode(mode);
+    let mut style = (*ctx.style()).clone();
+    let mut visuals = if pal.is_dark {
+        egui::Visuals::dark()
+    } else {
+        egui::Visuals::light()
+    };
+
+    visuals.panel_fill = pal.bg_canvas;
+    visuals.window_fill = pal.bg_card;
+    visuals.extreme_bg_color = if pal.is_dark {
+        Color32::from_rgb(8, 11, 19)
+    } else {
+        Color32::from_rgb(255, 255, 255)
+    };
+    visuals.faint_bg_color = pal.bg_card_subtle;
+    visuals.override_text_color = Some(pal.text_primary);
 
     let radius = CornerRadius::same(8);
     visuals.window_corner_radius = CornerRadius::same(12);
     visuals.menu_corner_radius = CornerRadius::same(8);
 
-    visuals.widgets.noninteractive.bg_fill = BG_CARD;
-    visuals.widgets.noninteractive.weak_bg_fill = BG_CARD;
-    visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, BORDER_SUBTLE);
-    visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, TEXT_PRIMARY);
+    visuals.widgets.noninteractive.bg_fill = pal.bg_card;
+    visuals.widgets.noninteractive.weak_bg_fill = pal.bg_card;
+    visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, pal.border_subtle);
+    visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, pal.text_primary);
     visuals.widgets.noninteractive.corner_radius = radius;
 
-    visuals.widgets.inactive.bg_fill = Color32::from_rgb(30, 41, 59);
-    visuals.widgets.inactive.weak_bg_fill = Color32::from_rgb(24, 34, 50);
-    visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, BORDER_SUBTLE);
-    visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, TEXT_PRIMARY);
+    visuals.widgets.inactive.bg_fill = pal.bg_card_subtle;
+    visuals.widgets.inactive.weak_bg_fill = pal.bg_card_subtle;
+    visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, pal.border_subtle);
+    visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, pal.text_primary);
     visuals.widgets.inactive.corner_radius = radius;
 
-    visuals.widgets.hovered.bg_fill = Color32::from_rgb(41, 55, 78);
-    visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(35, 48, 68);
-    visuals.widgets.hovered.bg_stroke = Stroke::new(1.5, ACCENT_CYAN);
-    visuals.widgets.hovered.fg_stroke = Stroke::new(1.5, Color32::WHITE);
+    visuals.widgets.hovered.bg_fill = pal.bg_card_hover;
+    visuals.widgets.hovered.weak_bg_fill = pal.bg_card_hover;
+    visuals.widgets.hovered.bg_stroke = Stroke::new(1.5, pal.accent_cyan);
+    visuals.widgets.hovered.fg_stroke = Stroke::new(1.5, pal.text_primary);
     visuals.widgets.hovered.corner_radius = radius;
 
-    visuals.widgets.active.bg_fill = ACCENT_RUST;
-    visuals.widgets.active.weak_bg_fill = ACCENT_RUST;
+    visuals.widgets.active.bg_fill = pal.accent_rust;
+    visuals.widgets.active.weak_bg_fill = pal.accent_rust;
     visuals.widgets.active.bg_stroke = Stroke::new(1.5, Color32::WHITE);
     visuals.widgets.active.fg_stroke = Stroke::new(1.5, Color32::WHITE);
     visuals.widgets.active.corner_radius = radius;
 
-    visuals.selection.bg_fill = Color32::from_rgba_unmultiplied(56, 189, 248, 65);
-    visuals.selection.stroke = Stroke::new(1.5, ACCENT_CYAN);
+    visuals.selection.bg_fill = Color32::from_rgba_unmultiplied(
+        pal.accent_cyan.r(),
+        pal.accent_cyan.g(),
+        pal.accent_cyan.b(),
+        55,
+    );
+    visuals.selection.stroke = Stroke::new(1.5, pal.accent_cyan);
 
     style.visuals = visuals;
-    // 8dp / 4dp Spacing Rhythm (UI/UX Pro Max `spacing-scale`)
     style.spacing.item_spacing = egui::vec2(8.0, 8.0);
     style.spacing.button_padding = egui::vec2(12.0, 7.0);
     style.spacing.window_margin = egui::Margin::same(12);
@@ -294,7 +399,6 @@ fn paint_vector_icon(painter: &egui::Painter, rect: Rect, icon: VectorIcon, colo
             painter.circle_filled(c, r * 0.25, color);
         }
         VectorIcon::CleanerSweep => {
-            // Sparkle / Four-point precision star
             painter.line_segment([Pos2::new(c.x, c.y - r), Pos2::new(c.x, c.y + r)], s);
             painter.line_segment([Pos2::new(c.x - r, c.y), Pos2::new(c.x + r, c.y)], s);
             let d = r * 0.55;
@@ -308,7 +412,6 @@ fn paint_vector_icon(painter: &egui::Painter, rect: Rect, icon: VectorIcon, colo
             );
         }
         VectorIcon::RegistryGrid => {
-            // 2x2 Modular Registry Hive Cubes
             let g = r * 0.18;
             let b = r * 0.72;
             let tl = Rect::from_min_max(Pos2::new(c.x - b, c.y - b), Pos2::new(c.x - g, c.y - g));
@@ -320,7 +423,6 @@ fn paint_vector_icon(painter: &egui::Painter, rect: Rect, icon: VectorIcon, colo
             }
         }
         VectorIcon::StartupBolt => {
-            // Lightning / Fast Boot Bolt
             let pts = vec![
                 Pos2::new(c.x + r * 0.15, c.y - r),
                 Pos2::new(c.x - r * 0.65, c.y + r * 0.1),
@@ -332,7 +434,6 @@ fn paint_vector_icon(painter: &egui::Painter, rect: Rect, icon: VectorIcon, colo
             painter.add(egui::Shape::closed_line(pts, s));
         }
         VectorIcon::UninstallerBox => {
-            // Package Box + Minus line
             let box_r = Rect::from_center_size(c, Vec2::splat(r * 1.55));
             painter.rect_stroke(box_r, CornerRadius::same(2), s, egui::StrokeKind::Inside);
             painter.line_segment(
@@ -351,7 +452,6 @@ fn paint_vector_icon(painter: &egui::Painter, rect: Rect, icon: VectorIcon, colo
             );
         }
         VectorIcon::DriveCylinder => {
-            // Storage Drive Enclosure + Activity LED
             let drv = Rect::from_center_size(c, Vec2::new(r * 1.75, r * 1.25));
             painter.rect_stroke(drv, CornerRadius::same(3), s, egui::StrokeKind::Inside);
             painter.line_segment(
@@ -364,7 +464,6 @@ fn paint_vector_icon(painter: &egui::Painter, rect: Rect, icon: VectorIcon, colo
             painter.circle_filled(Pos2::new(drv.right() - r * 0.4, c.y - r * 0.2), 2.0, color);
         }
         VectorIcon::SoftwareCloudUp => {
-            // Upward Arrow inside Circular Package Ring
             painter.circle_stroke(c, r * 0.9, s);
             painter.line_segment(
                 [
@@ -389,7 +488,6 @@ fn paint_vector_icon(painter: &egui::Painter, rect: Rect, icon: VectorIcon, colo
             );
         }
         VectorIcon::DriverChip => {
-            // Hardware Microchip die + Pins
             let die = Rect::from_center_size(c, Vec2::splat(r * 1.15));
             painter.rect_stroke(die, CornerRadius::same(2), s, egui::StrokeKind::Inside);
             for offset in [-r * 0.3, r * 0.3] {
@@ -424,7 +522,6 @@ fn paint_vector_icon(painter: &egui::Painter, rect: Rect, icon: VectorIcon, colo
             }
         }
         VectorIcon::AutomationPulse => {
-            // Kernel Pulse Wave
             let pts = vec![
                 Pos2::new(c.x - r, c.y),
                 Pos2::new(c.x - r * 0.45, c.y),
@@ -485,12 +582,37 @@ fn paint_vector_icon(painter: &egui::Painter, rect: Rect, icon: VectorIcon, colo
             let sq = Rect::from_center_size(c, Vec2::splat(r * 1.1));
             painter.rect_filled(sq, CornerRadius::same(2), color);
         }
+        VectorIcon::SunLight => {
+            painter.circle_stroke(c, r * 0.48, s);
+            for angle_deg in (0..360).step_by(45) {
+                let rad = (angle_deg as f32).to_radians();
+                let p1 = Pos2::new(c.x + rad.cos() * r * 0.68, c.y + rad.sin() * r * 0.68);
+                let p2 = Pos2::new(c.x + rad.cos() * r * 0.98, c.y + rad.sin() * r * 0.98);
+                painter.line_segment([p1, p2], s);
+            }
+        }
+        VectorIcon::MoonDark => {
+            painter.circle_stroke(c, r * 0.75, s);
+            painter.circle_filled(Pos2::new(c.x + r * 0.28, c.y - r * 0.22), r * 0.48, color);
+        }
+        VectorIcon::GlobeLang => {
+            painter.circle_stroke(c, r * 0.88, s);
+            painter.line_segment(
+                [Pos2::new(c.x - r * 0.88, c.y), Pos2::new(c.x + r * 0.88, c.y)],
+                s,
+            );
+            painter.line_segment(
+                [Pos2::new(c.x, c.y - r * 0.88), Pos2::new(c.x, c.y + r * 0.88)],
+                s,
+            );
+        }
     }
 }
 
 /// Renders a semantic action button with a vector icon, proper contrast, and pointing-hand cursor.
 fn draw_action_button(
     ui: &mut egui::Ui,
+    pal: &ThemePalette,
     label: &str,
     icon: VectorIcon,
     variant: ButtonVariant,
@@ -498,24 +620,32 @@ fn draw_action_button(
 ) -> bool {
     let (bg_fill, border_stroke, text_color) = match variant {
         ButtonVariant::PrimaryScan => (
-            Color32::from_rgb(18, 42, 68),
-            Stroke::new(1.2, ACCENT_CYAN),
-            ACCENT_CYAN,
+            if pal.is_dark {
+                Color32::from_rgb(18, 42, 68)
+            } else {
+                Color32::from_rgb(224, 242, 254)
+            },
+            Stroke::new(1.2, pal.accent_cyan),
+            pal.accent_cyan,
         ),
         ButtonVariant::ExecuteBrand => (
-            ACCENT_RUST,
-            Stroke::new(1.0, Color32::from_rgb(255, 150, 90)),
+            pal.accent_rust,
+            Stroke::new(1.0, pal.accent_rust),
             Color32::WHITE,
         ),
         ButtonVariant::Secondary => (
-            Color32::from_rgb(30, 41, 59),
-            Stroke::new(1.0, BORDER_STRONG),
-            TEXT_PRIMARY,
+            pal.bg_card_subtle,
+            Stroke::new(1.0, pal.border_strong),
+            pal.text_primary,
         ),
         ButtonVariant::Danger => (
-            Color32::from_rgb(69, 20, 26),
-            Stroke::new(1.2, ACCENT_RED),
-            Color32::from_rgb(254, 202, 202),
+            if pal.is_dark {
+                Color32::from_rgb(69, 20, 26)
+            } else {
+                Color32::from_rgb(254, 226, 226)
+            },
+            Stroke::new(1.2, pal.accent_red),
+            pal.accent_red,
         ),
     };
 
@@ -524,11 +654,11 @@ fn draw_action_button(
     } else {
         Color32::from_rgba_unmultiplied(bg_fill.r(), bg_fill.g(), bg_fill.b(), 85)
     };
-    let fg = if enabled { text_color } else { TEXT_MUTED };
+    let fg = if enabled { text_color } else { pal.text_muted };
     let stroke = if enabled {
         border_stroke
     } else {
-        Stroke::new(1.0, BORDER_SUBTLE)
+        Stroke::new(1.0, pal.border_subtle)
     };
 
     let mut clicked = false;
@@ -571,6 +701,7 @@ fn draw_action_button(
 /// Renders a Bento-grid KPI metric card with tabular monospace value (`number-tabular`).
 fn draw_kpi_card(
     ui: &mut egui::Ui,
+    pal: &ThemePalette,
     title: &str,
     value: &str,
     subtitle: &str,
@@ -579,8 +710,8 @@ fn draw_kpi_card(
 ) {
     let avail_w = ui.available_width();
     egui::Frame::new()
-        .fill(BG_CARD)
-        .stroke(Stroke::new(1.0, BORDER_SUBTLE))
+        .fill(pal.bg_card)
+        .stroke(Stroke::new(1.0, pal.border_subtle))
         .corner_radius(CornerRadius::same(10))
         .inner_margin(egui::Margin::symmetric(14, 11))
         .show(ui, |ui| {
@@ -591,7 +722,7 @@ fn draw_kpi_card(
                 ui.label(
                     RichText::new(title)
                         .size(11.0)
-                        .color(TEXT_SECONDARY)
+                        .color(pal.text_secondary)
                         .strong(),
                 );
             });
@@ -601,9 +732,9 @@ fn draw_kpi_card(
                     .size(19.5)
                     .strong()
                     .monospace()
-                    .color(TEXT_PRIMARY),
+                    .color(pal.text_primary),
             );
-            ui.label(RichText::new(subtitle).size(11.0).color(TEXT_MUTED));
+            ui.label(RichText::new(subtitle).size(11.0).color(pal.text_muted));
         });
 }
 
@@ -613,7 +744,7 @@ fn draw_pill_badge(ui: &mut egui::Ui, text: &str, bg: Color32, fg: Color32) {
         .fill(bg)
         .stroke(Stroke::new(
             1.0,
-            Color32::from_rgba_unmultiplied(fg.r(), fg.g(), fg.b(), 70),
+            Color32::from_rgba_unmultiplied(fg.r(), fg.g(), fg.b(), 75),
         ))
         .corner_radius(CornerRadius::same(14))
         .inner_margin(egui::Margin::symmetric(8, 3))
@@ -625,16 +756,23 @@ fn draw_pill_badge(ui: &mut egui::Ui, text: &str, bg: Color32, fg: Color32) {
         });
 }
 
-fn card_frame() -> egui::Frame {
+fn card_frame(pal: &ThemePalette) -> egui::Frame {
     egui::Frame::new()
-        .fill(BG_CARD)
-        .stroke(Stroke::new(1.0, BORDER_SUBTLE))
+        .fill(pal.bg_card)
+        .stroke(Stroke::new(1.0, pal.border_subtle))
         .corner_radius(CornerRadius::same(10))
         .inner_margin(egui::Margin::symmetric(14, 12))
 }
 
 /// Renders an Empty State illustration + title + description (`empty-states` rule).
-fn draw_empty_state(ui: &mut egui::Ui, icon: VectorIcon, accent: Color32, title: &str, desc: &str) {
+fn draw_empty_state(
+    ui: &mut egui::Ui,
+    pal: &ThemePalette,
+    icon: VectorIcon,
+    accent: Color32,
+    title: &str,
+    desc: &str,
+) {
     ui.vertical_centered(|ui| {
         ui.add_space(44.0);
         egui::Frame::new()
@@ -642,7 +780,7 @@ fn draw_empty_state(ui: &mut egui::Ui, icon: VectorIcon, accent: Color32, title:
                 accent.r(),
                 accent.g(),
                 accent.b(),
-                28,
+                26,
             ))
             .stroke(Stroke::new(
                 1.0,
@@ -659,17 +797,19 @@ fn draw_empty_state(ui: &mut egui::Ui, icon: VectorIcon, accent: Color32, title:
             RichText::new(title)
                 .size(15.0)
                 .strong()
-                .color(TEXT_PRIMARY),
+                .color(pal.text_primary),
         );
         ui.add_space(4.0);
-        ui.label(RichText::new(desc).size(12.0).color(TEXT_MUTED));
+        ui.label(RichText::new(desc).size(12.0).color(pal.text_muted));
     });
 }
 
-/// Renders a sidebar navigation item with a custom vector icon, active left indicator bar,
+/// Renders a sidebar navigation item with a custom vector icon, active indicator border,
 /// and optional live badge count (`nav-state-active` & `tab-badge`).
+#[allow(clippy::too_many_arguments)]
 fn draw_sidebar_nav_item(
     ui: &mut egui::Ui,
+    pal: &ThemePalette,
     icon: VectorIcon,
     accent: Color32,
     title: &str,
@@ -679,14 +819,14 @@ fn draw_sidebar_nav_item(
 ) -> bool {
     let mut clicked = false;
     let fill = if is_selected {
-        BG_CARD_HOVER
+        pal.bg_card_hover
     } else {
-        BG_CARD_SUBTLE
+        pal.bg_card_subtle
     };
     let border = if is_selected {
         Stroke::new(1.5, accent)
     } else {
-        Stroke::new(1.0, BORDER_SUBTLE)
+        Stroke::new(1.0, pal.border_subtle)
     };
 
     let frame_resp = egui::Frame::new()
@@ -699,12 +839,11 @@ fn draw_sidebar_nav_item(
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
 
-                // Dedicated 28x28 vector icon container (Zero coordinate overlap!)
                 egui::Frame::new()
                     .fill(if is_selected {
                         accent
                     } else {
-                        Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 32)
+                        Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 30)
                     })
                     .corner_radius(CornerRadius::same(7))
                     .inner_margin(egui::Margin::same(5))
@@ -730,11 +869,7 @@ fn draw_sidebar_nav_item(
                             RichText::new(title)
                                 .size(13.0)
                                 .strong()
-                                .color(if is_selected {
-                                    Color32::WHITE
-                                } else {
-                                    TEXT_PRIMARY
-                                }),
+                                .color(pal.text_primary),
                         );
                         if let Some(cnt) = badge_count {
                             if cnt > 0 {
@@ -745,7 +880,7 @@ fn draw_sidebar_nav_item(
                                         accent.r(),
                                         accent.g(),
                                         accent.b(),
-                                        45,
+                                        38,
                                     ),
                                     accent,
                                 );
@@ -756,9 +891,9 @@ fn draw_sidebar_nav_item(
                         RichText::new(subtitle)
                             .size(10.5)
                             .color(if is_selected {
-                                TEXT_SECONDARY
+                                pal.text_secondary
                             } else {
-                                TEXT_MUTED
+                                pal.text_muted
                             }),
                     );
                 });
@@ -781,10 +916,17 @@ fn draw_sidebar_nav_item(
 
 impl eframe::App for RustCleanerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if !self.theme_initialized {
-            configure_pro_max_theme(ctx);
-            self.theme_initialized = true;
+        if !self.fonts_initialized {
+            configure_cjk_fonts_once(ctx);
+            self.fonts_initialized = true;
         }
+        if self.applied_theme != Some(self.theme_mode) {
+            apply_pro_max_theme(ctx, self.theme_mode);
+            self.applied_theme = Some(self.theme_mode);
+        }
+
+        let pal = ThemePalette::for_mode(self.theme_mode);
+        let s = self.language.strings();
 
         // Poll background cleaner results
         if let Ok(mut guard) = self.cleaner_result_rx.lock() {
@@ -792,14 +934,16 @@ impl eframe::App for RustCleanerApp {
                 self.cleaner_busy = false;
                 if was_clean {
                     self.status_banner = format!(
-                        "Pulizia completata: {} file eliminati ({}) — {} file in uso saltati in sicurezza.",
+                        "{}: {} ({}) — {} skipped.",
+                        s.kpi_space_freed,
                         summary.total_files_deleted,
                         format_bytes(summary.total_bytes_deleted),
                         summary.total_skipped_locked
                     );
                 } else {
                     self.status_banner = format!(
-                        "Analisi completata: {} file rilevati ({}) — {} file attualmente in uso/bloccati.",
+                        "{}: {} ({}) — {} locked.",
+                        s.kpi_space_found,
                         summary.total_files_found,
                         format_bytes(summary.total_bytes_found),
                         summary.total_skipped_locked
@@ -857,20 +1001,25 @@ impl eframe::App for RustCleanerApp {
             ctx.request_repaint_after(std::time::Duration::from_millis(250));
         }
 
-        // === TOP HEADER BAR ===
+        // === TOP HEADER BAR (Brand + Language Switcher + Dark/Light Toggle + UAC + Drive) ===
         egui::TopBottomPanel::top("top_header")
             .frame(
                 egui::Frame::new()
-                    .fill(BG_HEADER)
-                    .stroke(Stroke::new(1.0, BORDER_SUBTLE))
+                    .fill(pal.bg_header)
+                    .stroke(Stroke::new(1.0, pal.border_subtle))
                     .inner_margin(egui::Margin::symmetric(18, 10)),
             )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     // Vector Shield Brand Emblem
                     egui::Frame::new()
-                        .fill(Color32::from_rgba_unmultiplied(249, 115, 22, 35))
-                        .stroke(Stroke::new(1.5, ACCENT_RUST))
+                        .fill(Color32::from_rgba_unmultiplied(
+                            pal.accent_rust.r(),
+                            pal.accent_rust.g(),
+                            pal.accent_rust.b(),
+                            30,
+                        ))
+                        .stroke(Stroke::new(1.5, pal.accent_rust))
                         .corner_radius(CornerRadius::same(9))
                         .inner_margin(egui::Margin::same(7))
                         .show(ui, |ui| {
@@ -880,7 +1029,7 @@ impl eframe::App for RustCleanerApp {
                                 ui.painter(),
                                 r,
                                 VectorIcon::BrandShield,
-                                ACCENT_RUST,
+                                pal.accent_rust,
                             );
                         });
 
@@ -892,46 +1041,60 @@ impl eframe::App for RustCleanerApp {
                                 RichText::new("RustCleaner")
                                     .size(19.0)
                                     .strong()
-                                    .color(TEXT_PRIMARY),
+                                    .color(pal.text_primary),
                             );
                             draw_pill_badge(
                                 ui,
                                 "MEGA ALPHA v1.0.0-alpha",
-                                Color32::from_rgba_unmultiplied(249, 115, 22, 35),
-                                ACCENT_RUST,
+                                Color32::from_rgba_unmultiplied(
+                                    pal.accent_rust.r(),
+                                    pal.accent_rust.g(),
+                                    pal.accent_rust.b(),
+                                    30,
+                                ),
+                                pal.accent_rust,
                             );
                             draw_pill_badge(
                                 ui,
-                                "ZERO TELEMETRIA • 0 MB RAM",
-                                Color32::from_rgba_unmultiplied(34, 197, 94, 30),
-                                ACCENT_EMERALD,
+                                s.badge_zero_telemetry,
+                                Color32::from_rgba_unmultiplied(
+                                    pal.accent_emerald.r(),
+                                    pal.accent_emerald.g(),
+                                    pal.accent_emerald.b(),
+                                    28,
+                                ),
+                                pal.accent_emerald,
                             );
                         });
                         ui.label(
-                            RichText::new(
-                                "System Cleaner • Registry Guard • Winget Updater • Windows Update Drivers • Kernel Monitor",
-                            )
-                            .size(11.5)
-                            .color(TEXT_SECONDARY),
+                            RichText::new(s.header_subtitle)
+                                .size(11.5)
+                                .color(pal.text_secondary),
                         );
                     });
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // 1. UAC Status / Elevate Button
                         if self.is_admin {
                             draw_pill_badge(
                                 ui,
-                                "UAC: AMMINISTRATORE",
-                                Color32::from_rgba_unmultiplied(34, 197, 94, 35),
-                                ACCENT_EMERALD,
+                                s.uac_admin_active,
+                                Color32::from_rgba_unmultiplied(
+                                    pal.accent_emerald.r(),
+                                    pal.accent_emerald.g(),
+                                    pal.accent_emerald.b(),
+                                    32,
+                                ),
+                                pal.accent_emerald,
                             );
                         } else {
                             let uac_btn = egui::Button::new(
-                                RichText::new("Eleva UAC (Admin)")
-                                    .size(12.0)
+                                RichText::new(s.btn_elevate_uac)
+                                    .size(11.5)
                                     .strong()
-                                    .color(Color32::from_rgb(15, 23, 42)),
+                                    .color(Color32::WHITE),
                             )
-                            .fill(ACCENT_AMBER)
+                            .fill(pal.accent_amber)
                             .corner_radius(CornerRadius::same(14));
 
                             let resp = ui.add(uac_btn);
@@ -946,12 +1109,90 @@ impl eframe::App for RustCleanerApp {
                             }
                             draw_pill_badge(
                                 ui,
-                                "MODO UTENTE STANDARD",
-                                Color32::from_rgba_unmultiplied(245, 158, 11, 30),
-                                ACCENT_AMBER,
+                                s.uac_standard_mode,
+                                Color32::from_rgba_unmultiplied(
+                                    pal.accent_amber.r(),
+                                    pal.accent_amber.g(),
+                                    pal.accent_amber.b(),
+                                    28,
+                                ),
+                                pal.accent_amber,
                             );
                         }
 
+                        // 2. Dark / Light Theme Switcher Button
+                        let (theme_icon, theme_lbl) = match self.theme_mode {
+                            ThemeMode::Dark => (VectorIcon::MoonDark, s.theme_dark_label),
+                            ThemeMode::Light => (VectorIcon::SunLight, s.theme_light_label),
+                        };
+                        if draw_action_button(
+                            ui,
+                            &pal,
+                            theme_lbl,
+                            theme_icon,
+                            ButtonVariant::Secondary,
+                            true,
+                        ) {
+                            self.theme_mode = match self.theme_mode {
+                                ThemeMode::Dark => ThemeMode::Light,
+                                ThemeMode::Light => ThemeMode::Dark,
+                            };
+                        }
+
+                        // 3. 7-Language Selector (IT, EN, FR, ES, DE, ZH, PT)
+                        egui::Frame::new()
+                            .fill(pal.bg_card_subtle)
+                            .stroke(Stroke::new(1.0, pal.border_strong))
+                            .corner_radius(CornerRadius::same(8))
+                            .inner_margin(egui::Margin::symmetric(8, 4))
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 5.0;
+                                    let (g_rect, _) = ui.allocate_exact_size(
+                                        egui::vec2(15.0, 15.0),
+                                        Sense::hover(),
+                                    );
+                                    paint_vector_icon(
+                                        ui.painter(),
+                                        g_rect,
+                                        VectorIcon::GlobeLang,
+                                        pal.accent_cyan,
+                                    );
+                                    let prev_lang = self.language;
+                                    egui::ComboBox::from_id_salt("header_lang_selector")
+                                        .selected_text(
+                                            RichText::new(self.language.display_name())
+                                                .size(12.0)
+                                                .strong()
+                                                .color(pal.text_primary),
+                                        )
+                                        .width(135.0)
+                                        .show_ui(ui, |ui| {
+                                            for &lang in Language::all() {
+                                                let resp = ui.selectable_value(
+                                                    &mut self.language,
+                                                    lang,
+                                                    lang.display_name(),
+                                                );
+                                                if resp.hovered() {
+                                                    ui.ctx().set_cursor_icon(
+                                                        egui::CursorIcon::PointingHand,
+                                                    );
+                                                }
+                                            }
+                                        });
+                                    if self.language != prev_lang {
+                                        let new_s = self.language.strings();
+                                        self.status_banner = if self.is_admin {
+                                            new_s.default_banner_admin.to_string()
+                                        } else {
+                                            new_s.default_banner_user.to_string()
+                                        };
+                                    }
+                                });
+                            });
+
+                        // 4. Primary Drive Free Space Indicator
                         if let Some(d) = self.drives.first() {
                             let used_ratio = if d.total_bytes > 0 {
                                 d.used_bytes as f32 / d.total_bytes as f32
@@ -959,30 +1200,31 @@ impl eframe::App for RustCleanerApp {
                                 0.0
                             };
                             egui::Frame::new()
-                                .fill(BG_CARD)
-                                .stroke(Stroke::new(1.0, BORDER_SUBTLE))
+                                .fill(pal.bg_card)
+                                .stroke(Stroke::new(1.0, pal.border_subtle))
                                 .corner_radius(CornerRadius::same(8))
                                 .inner_margin(egui::Margin::symmetric(10, 5))
                                 .show(ui, |ui| {
                                     ui.horizontal(|ui| {
                                         ui.label(
                                             RichText::new(format!(
-                                                "{} Libero: {}",
+                                                "{} {}: {}",
                                                 d.root_path,
+                                                s.drive_free_label,
                                                 format_bytes(d.free_bytes)
                                             ))
                                             .size(11.0)
                                             .monospace()
-                                            .color(TEXT_SECONDARY),
+                                            .color(pal.text_secondary),
                                         );
                                         let (bar_rect, _) = ui.allocate_exact_size(
-                                            egui::vec2(56.0, 6.0),
+                                            egui::vec2(50.0, 6.0),
                                             Sense::hover(),
                                         );
                                         ui.painter().rect_filled(
                                             bar_rect,
                                             CornerRadius::same(3),
-                                            Color32::from_rgb(35, 45, 62),
+                                            pal.bg_track,
                                         );
                                         let mut fill_rect = bar_rect;
                                         fill_rect.set_width(
@@ -992,9 +1234,9 @@ impl eframe::App for RustCleanerApp {
                                             fill_rect,
                                             CornerRadius::same(3),
                                             if used_ratio > 0.85 {
-                                                ACCENT_RED
+                                                pal.accent_red
                                             } else {
-                                                ACCENT_CYAN
+                                                pal.accent_cyan
                                             },
                                         );
                                     });
@@ -1008,8 +1250,8 @@ impl eframe::App for RustCleanerApp {
         egui::TopBottomPanel::bottom("bottom_status")
             .frame(
                 egui::Frame::new()
-                    .fill(BG_HEADER)
-                    .stroke(Stroke::new(1.0, BORDER_SUBTLE))
+                    .fill(pal.bg_header)
+                    .stroke(Stroke::new(1.0, pal.border_subtle))
                     .inner_margin(egui::Margin::symmetric(18, 7)),
             )
             .show(ctx, |ui| {
@@ -1019,9 +1261,9 @@ impl eframe::App for RustCleanerApp {
                         || self.winget_busy
                         || self.driver_busy;
                     let (dot_color, state_label) = if is_busy {
-                        (ACCENT_AMBER, "IN ESECUZIONE")
+                        (pal.accent_amber, s.status_running)
                     } else {
-                        (ACCENT_EMERALD, "PRONTO")
+                        (pal.accent_emerald, s.status_ready)
                     };
                     let (dot_rect, _) =
                         ui.allocate_exact_size(egui::vec2(8.0, 8.0), Sense::hover());
@@ -1041,7 +1283,7 @@ impl eframe::App for RustCleanerApp {
                     ui.label(
                         RichText::new(&self.status_banner)
                             .size(12.0)
-                            .color(TEXT_SECONDARY),
+                            .color(pal.text_secondary),
                     );
                 });
             });
@@ -1049,11 +1291,11 @@ impl eframe::App for RustCleanerApp {
         // === LEFT NAVIGATION SIDEBAR ===
         egui::SidePanel::left("left_sidebar")
             .resizable(false)
-            .exact_width(254.0)
+            .exact_width(256.0)
             .frame(
                 egui::Frame::new()
-                    .fill(BG_SIDEBAR)
-                    .stroke(Stroke::new(1.0, BORDER_SUBTLE))
+                    .fill(pal.bg_sidebar)
+                    .stroke(Stroke::new(1.0, pal.border_subtle))
                     .inner_margin(egui::Margin::symmetric(12, 12)),
             )
             .show(ctx, |ui| {
@@ -1061,10 +1303,10 @@ impl eframe::App for RustCleanerApp {
                     .id_salt("sidebar_nav_scroll")
                     .show(ui, |ui| {
                         ui.label(
-                            RichText::new("MANUTENZIONE & PULIZIA")
+                            RichText::new(s.sidebar_sec_maintenance)
                                 .size(10.5)
                                 .strong()
-                                .color(TEXT_MUTED),
+                                .color(pal.text_muted),
                         );
                         ui.add_space(4.0);
 
@@ -1083,65 +1325,65 @@ impl eframe::App for RustCleanerApp {
                             (
                                 ActiveTab::Cleaner,
                                 VectorIcon::CleanerSweep,
-                                ACCENT_RUST,
-                                "Pulizia Rapida",
-                                "File temp, cache e browser",
+                                pal.accent_rust,
+                                s.nav_cleaner_title,
+                                s.nav_cleaner_sub,
                                 None,
                             ),
                             (
                                 ActiveTab::Registry,
                                 VectorIcon::RegistryGrid,
-                                ACCENT_AMBER,
-                                "Registro Windows",
-                                "Ripara chiavi + Backup .reg",
+                                pal.accent_amber,
+                                s.nav_registry_title,
+                                s.nav_registry_sub,
                                 reg_cnt,
                             ),
                             (
                                 ActiveTab::Startup,
                                 VectorIcon::StartupBolt,
-                                ACCENT_CYAN,
-                                "Avvio Automatico",
-                                "Gestisci app all'avvio",
+                                pal.accent_cyan,
+                                s.nav_startup_title,
+                                s.nav_startup_sub,
                                 Some(self.startup_entries.len()),
                             ),
                             (
                                 ActiveTab::Uninstaller,
                                 VectorIcon::UninstallerBox,
-                                ACCENT_PURPLE,
-                                "Disinstallazione",
-                                "Rimuovi software installati",
+                                pal.accent_purple,
+                                s.nav_uninstall_title,
+                                s.nav_uninstall_sub,
                                 Some(self.installed_apps.len()),
                             ),
                             (
                                 ActiveTab::DriveWiper,
                                 VectorIcon::DriveCylinder,
-                                ACCENT_EMERALD,
-                                "Bonifica Disco",
-                                "Wipe spazio libero & MFT",
+                                pal.accent_emerald,
+                                s.nav_wiper_title,
+                                s.nav_wiper_sub,
                                 None,
                             ),
                             (
                                 ActiveTab::SoftwareUpdater,
                                 VectorIcon::SoftwareCloudUp,
-                                ACCENT_CYAN,
-                                "Software Updater",
-                                "Winget nativo (Zero DB)",
+                                pal.accent_cyan,
+                                s.nav_soft_title,
+                                s.nav_soft_sub,
                                 winget_cnt,
                             ),
                             (
                                 ActiveTab::DriverUpdater,
                                 VectorIcon::DriverChip,
-                                ACCENT_EMERALD,
-                                "Driver Updater",
-                                "Windows Update COM & WHQL",
+                                pal.accent_emerald,
+                                s.nav_driver_title,
+                                s.nav_driver_sub,
                                 driver_cnt,
                             ),
                             (
                                 ActiveTab::AutomationMonitor,
                                 VectorIcon::AutomationPulse,
-                                ACCENT_PURPLE,
-                                "Pianifica & Monitor",
-                                "schtasks (0 RAM) + notify",
+                                pal.accent_purple,
+                                s.nav_auto_title,
+                                s.nav_auto_sub,
                                 None,
                             ),
                         ];
@@ -1152,10 +1394,10 @@ impl eframe::App for RustCleanerApp {
                             if idx == 5 {
                                 ui.add_space(6.0);
                                 ui.label(
-                                    RichText::new("FUNZIONI PREMIUM FREE")
+                                    RichText::new(s.sidebar_sec_premium)
                                         .size(10.5)
                                         .strong()
-                                        .color(ACCENT_CYAN),
+                                        .color(pal.accent_cyan),
                                 );
                                 ui.add_space(3.0);
                             }
@@ -1163,6 +1405,7 @@ impl eframe::App for RustCleanerApp {
                             let is_selected = self.active_tab == *tab;
                             if draw_sidebar_nav_item(
                                 ui,
+                                &pal,
                                 *icon,
                                 *color,
                                 title,
@@ -1188,8 +1431,8 @@ impl eframe::App for RustCleanerApp {
 
                         ui.add_space(6.0);
                         egui::Frame::new()
-                            .fill(BG_CARD)
-                            .stroke(Stroke::new(1.0, BORDER_SUBTLE))
+                            .fill(pal.bg_card)
+                            .stroke(Stroke::new(1.0, pal.border_subtle))
                             .corner_radius(CornerRadius::same(9))
                             .inner_margin(egui::Margin::symmetric(10, 8))
                             .show(ui, |ui| {
@@ -1201,21 +1444,19 @@ impl eframe::App for RustCleanerApp {
                                         ui.painter(),
                                         r,
                                         VectorIcon::CheckShield,
-                                        ACCENT_EMERALD,
+                                        pal.accent_emerald,
                                     );
                                     ui.label(
-                                        RichText::new("100% Privacy & Zero Telemetria")
+                                        RichText::new(s.privacy_card_title)
                                             .size(11.0)
-                                            .color(ACCENT_EMERALD)
+                                            .color(pal.accent_emerald)
                                             .strong(),
                                     );
                                 });
                                 ui.label(
-                                    RichText::new(
-                                        "Nessun server terzo, nessun demone in RAM, nessun pop-up.",
-                                    )
-                                    .size(10.5)
-                                    .color(TEXT_SECONDARY),
+                                    RichText::new(s.privacy_card_desc)
+                                        .size(10.5)
+                                        .color(pal.text_secondary),
                                 );
                             });
                     });
@@ -1225,45 +1466,46 @@ impl eframe::App for RustCleanerApp {
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::new()
-                    .fill(BG_CANVAS)
+                    .fill(pal.bg_canvas)
                     .inner_margin(egui::Margin::symmetric(18, 14)),
             )
             .show(ctx, |ui| match self.active_tab {
-                ActiveTab::Cleaner => self.render_cleaner_tab(ui),
-                ActiveTab::Registry => self.render_registry_tab(ui),
-                ActiveTab::Startup => self.render_startup_tab(ui),
-                ActiveTab::Uninstaller => self.render_uninstaller_tab(ui),
-                ActiveTab::DriveWiper => self.render_wiper_tab(ui),
-                ActiveTab::SoftwareUpdater => self.render_software_updater_tab(ui),
-                ActiveTab::DriverUpdater => self.render_driver_updater_tab(ui),
-                ActiveTab::AutomationMonitor => self.render_automation_monitor_tab(ui),
+                ActiveTab::Cleaner => self.render_cleaner_tab(ui, &pal),
+                ActiveTab::Registry => self.render_registry_tab(ui, &pal),
+                ActiveTab::Startup => self.render_startup_tab(ui, &pal),
+                ActiveTab::Uninstaller => self.render_uninstaller_tab(ui, &pal),
+                ActiveTab::DriveWiper => self.render_wiper_tab(ui, &pal),
+                ActiveTab::SoftwareUpdater => self.render_software_updater_tab(ui, &pal),
+                ActiveTab::DriverUpdater => self.render_driver_updater_tab(ui, &pal),
+                ActiveTab::AutomationMonitor => self.render_automation_monitor_tab(ui, &pal),
             });
     }
 }
 
 impl RustCleanerApp {
-    fn render_cleaner_tab(&mut self, ui: &mut egui::Ui) {
+    fn render_cleaner_tab(&mut self, ui: &mut egui::Ui, pal: &ThemePalette) {
+        let s = self.language.strings();
+
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
                 ui.label(
-                    RichText::new("Pulizia del File System & Privacy Browser")
+                    RichText::new(s.cleaner_title)
                         .size(19.0)
                         .strong()
-                        .color(TEXT_PRIMARY),
+                        .color(pal.text_primary),
                 );
                 ui.label(
-                    RichText::new(
-                        "Motore multi-thread (rayon + walkdir) con rilevamento automatico dei file bloccati o in uso.",
-                    )
-                    .size(12.0)
-                    .color(TEXT_SECONDARY),
+                    RichText::new(s.cleaner_subtitle)
+                        .size(12.0)
+                        .color(pal.text_secondary),
                 );
             });
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if draw_action_button(
                     ui,
-                    "Avvia Pulizia",
+                    pal,
+                    s.btn_start_clean,
                     VectorIcon::PlayRun,
                     ButtonVariant::ExecuteBrand,
                     !self.cleaner_busy,
@@ -1273,7 +1515,8 @@ impl RustCleanerApp {
 
                 if draw_action_button(
                     ui,
-                    "Analizza Sistema",
+                    pal,
+                    s.btn_analyze_system,
                     VectorIcon::SearchLens,
                     ButtonVariant::PrimaryScan,
                     !self.cleaner_busy,
@@ -1286,56 +1529,60 @@ impl RustCleanerApp {
         ui.add_space(6.0);
 
         let (found_bytes, found_files, locked_files, deleted_bytes, deleted_files) =
-            if let Some(s) = &self.clean_summary {
+            if let Some(sum) = &self.clean_summary {
                 (
-                    format_bytes(s.total_bytes_found),
-                    format!("{} file rilevati", s.total_files_found),
-                    format!("{} file", s.total_skipped_locked),
-                    format_bytes(s.total_bytes_deleted),
-                    format!("{} file rimossi", s.total_files_deleted),
+                    format_bytes(sum.total_bytes_found),
+                    format!("{} files", sum.total_files_found),
+                    format!("{}", sum.total_skipped_locked),
+                    format_bytes(sum.total_bytes_deleted),
+                    format!("{} files", sum.total_files_deleted),
                 )
             } else {
                 (
                     "—".to_string(),
-                    "In attesa di analisi".to_string(),
+                    s.kpi_waiting_scan.to_string(),
                     "—".to_string(),
                     "0 B".to_string(),
-                    "Nessuna pulizia eseguita".to_string(),
+                    s.kpi_no_clean_yet.to_string(),
                 )
             };
 
         ui.columns(4, |cols| {
             draw_kpi_card(
                 &mut cols[0],
-                "SPAZIO RILEVATO",
+                pal,
+                s.kpi_space_found,
                 &found_bytes,
                 &found_files,
-                ACCENT_CYAN,
+                pal.accent_cyan,
                 VectorIcon::SearchLens,
             );
             draw_kpi_card(
                 &mut cols[1],
-                "FILE IN USO (PROTETTI)",
+                pal,
+                s.kpi_locked_files,
                 &locked_files,
-                "Saltati senza errori",
-                ACCENT_AMBER,
+                s.kpi_locked_sub,
+                pal.accent_amber,
                 VectorIcon::BrandShield,
             );
             draw_kpi_card(
                 &mut cols[2],
-                "SPAZIO LIBERATO",
+                pal,
+                s.kpi_space_freed,
                 &deleted_bytes,
                 &deleted_files,
-                ACCENT_EMERALD,
+                pal.accent_emerald,
                 VectorIcon::CheckShield,
             );
             let enabled_count = self.clean_rules.iter().filter(|r| r.enabled).count();
             draw_kpi_card(
                 &mut cols[3],
-                "REGOLE ATTIVE",
+                pal,
+                s.kpi_active_rules,
                 &format!("{} / {}", enabled_count, self.clean_rules.len()),
-                "Sistema, Explorer e Browser",
-                ACCENT_PURPLE,
+                s.kpi_active_rules_sub,
+                pal.accent_purple,
                 VectorIcon::CleanerSweep,
             );
         });
@@ -1344,23 +1591,20 @@ impl RustCleanerApp {
 
         if let Some(summary) = &self.clean_summary {
             if summary.total_bytes_found > 0 {
-                card_frame().show(ui, |ui| {
+                card_frame(pal).show(ui, |ui| {
                     let groups = [
-                        (RuleGroup::WindowsSystem, "Sistema Windows", ACCENT_RUST),
-                        (RuleGroup::WindowsExplorer, "Esplora File", ACCENT_AMBER),
-                        (RuleGroup::BrowsersPrivacy, "Browser & Privacy", ACCENT_CYAN),
-                        (RuleGroup::Applications, "Applicazioni", ACCENT_PURPLE),
+                        (RuleGroup::WindowsSystem, s.grp_win_sys, pal.accent_rust),
+                        (RuleGroup::WindowsExplorer, s.grp_explorer, pal.accent_amber),
+                        (RuleGroup::BrowsersPrivacy, s.grp_browsers, pal.accent_cyan),
+                        (RuleGroup::Applications, s.grp_apps, pal.accent_purple),
                     ];
 
                     let (bar_rect, _) = ui.allocate_exact_size(
                         egui::vec2(ui.available_width(), 8.0),
                         Sense::hover(),
                     );
-                    ui.painter().rect_filled(
-                        bar_rect,
-                        CornerRadius::same(4),
-                        Color32::from_rgb(32, 40, 56),
-                    );
+                    ui.painter()
+                        .rect_filled(bar_rect, CornerRadius::same(4), pal.bg_track);
 
                     let mut x_offset = bar_rect.left();
                     for (grp, _, color) in groups {
@@ -1399,7 +1643,7 @@ impl RustCleanerApp {
                                 RichText::new(format!("{label}: {}", format_bytes(grp_bytes)))
                                     .size(11.0)
                                     .monospace()
-                                    .color(TEXT_SECONDARY),
+                                    .color(pal.text_secondary),
                             );
                             ui.add_space(8.0);
                         }
@@ -1410,19 +1654,20 @@ impl RustCleanerApp {
         }
 
         let remaining_h = (ui.available_height() - 10.0).max(240.0);
+        let current_lang = self.language;
 
         ui.columns(2, |cols| {
-            card_frame().show(&mut cols[0], |ui| {
+            card_frame(pal).show(&mut cols[0], |ui| {
                 ui.set_height(remaining_h);
                 ui.horizontal(|ui| {
                     ui.label(
-                        RichText::new("Categorie di Pulizia")
+                        RichText::new(s.cleaner_categories_hdr)
                             .size(14.5)
                             .strong()
-                            .color(TEXT_PRIMARY),
+                            .color(pal.text_primary),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let none_btn = ui.small_button("Nessuna");
+                        let none_btn = ui.small_button(s.btn_none);
                         if none_btn.hovered() {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                         }
@@ -1431,7 +1676,7 @@ impl RustCleanerApp {
                                 r.enabled = false;
                             }
                         }
-                        let all_btn = ui.small_button("Tutte");
+                        let all_btn = ui.small_button(s.btn_all);
                         if all_btn.hovered() {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                         }
@@ -1445,11 +1690,11 @@ impl RustCleanerApp {
 
                 ui.horizontal_wrapped(|ui| {
                     let filters = [
-                        (None, "Tutte"),
-                        (Some(RuleGroup::WindowsSystem), "Sistema"),
-                        (Some(RuleGroup::WindowsExplorer), "Explorer"),
-                        (Some(RuleGroup::BrowsersPrivacy), "Browser"),
-                        (Some(RuleGroup::Applications), "App"),
+                        (None, s.flt_all),
+                        (Some(RuleGroup::WindowsSystem), s.flt_system),
+                        (Some(RuleGroup::WindowsExplorer), s.flt_explorer),
+                        (Some(RuleGroup::BrowsersPrivacy), s.flt_browser),
+                        (Some(RuleGroup::Applications), s.flt_app),
                     ];
                     for (flt, lbl) in filters {
                         let active = self.selected_rule_group_filter == flt;
@@ -1457,13 +1702,13 @@ impl RustCleanerApp {
                             RichText::new(lbl).size(11.5).strong().color(if active {
                                 Color32::WHITE
                             } else {
-                                TEXT_SECONDARY
+                                pal.text_secondary
                             }),
                         )
                         .fill(if active {
-                            ACCENT_RUST
+                            pal.accent_rust
                         } else {
-                            BG_CARD_SUBTLE
+                            pal.bg_card_subtle
                         })
                         .corner_radius(CornerRadius::same(14));
                         let resp = ui.add(btn);
@@ -1488,9 +1733,13 @@ impl RustCleanerApp {
                                     continue;
                                 }
                             }
+                            let (r_name, r_desc) = current_lang
+                                .localize_rule(rule.id)
+                                .unwrap_or((&rule.name, &rule.description));
+
                             egui::Frame::new()
-                                .fill(BG_CARD_SUBTLE)
-                                .stroke(Stroke::new(1.0, BORDER_SUBTLE))
+                                .fill(pal.bg_card_subtle)
+                                .stroke(Stroke::new(1.0, pal.border_subtle))
                                 .corner_radius(CornerRadius::same(8))
                                 .inner_margin(egui::Margin::symmetric(10, 7))
                                 .show(ui, |ui| {
@@ -1502,24 +1751,27 @@ impl RustCleanerApp {
                                                 .set_cursor_icon(egui::CursorIcon::PointingHand);
                                         }
                                         ui.label(
-                                            RichText::new(&rule.name)
+                                            RichText::new(r_name)
                                                 .size(13.0)
                                                 .strong()
-                                                .color(TEXT_PRIMARY),
+                                                .color(pal.text_primary),
                                         );
                                         if rule.requires_admin {
                                             draw_pill_badge(
                                                 ui,
                                                 "UAC",
-                                                Color32::from_rgba_unmultiplied(245, 158, 11, 35),
-                                                ACCENT_AMBER,
+                                                Color32::from_rgba_unmultiplied(
+                                                    pal.accent_amber.r(),
+                                                    pal.accent_amber.g(),
+                                                    pal.accent_amber.b(),
+                                                    32,
+                                                ),
+                                                pal.accent_amber,
                                             );
                                         }
                                     });
                                     ui.label(
-                                        RichText::new(&rule.description)
-                                            .size(11.0)
-                                            .color(TEXT_MUTED),
+                                        RichText::new(r_desc).size(11.0).color(pal.text_muted),
                                     );
                                 });
                             ui.add_space(4.0);
@@ -1527,13 +1779,13 @@ impl RustCleanerApp {
                     });
             });
 
-            card_frame().show(&mut cols[1], |ui| {
+            card_frame(pal).show(&mut cols[1], |ui| {
                 ui.set_height(remaining_h);
                 ui.label(
-                    RichText::new("Dettaglio Analisi e File Rilevati")
+                    RichText::new(s.cleaner_details_hdr)
                         .size(14.5)
                         .strong()
-                        .color(TEXT_PRIMARY),
+                        .color(pal.text_primary),
                 );
                 ui.separator();
 
@@ -1543,9 +1795,9 @@ impl RustCleanerApp {
                         ui.spinner();
                         ui.add_space(10.0);
                         ui.label(
-                            RichText::new("Scansione parallela multi-thread in corso...")
+                            RichText::new(s.cleaner_scanning_msg)
                                 .size(13.5)
-                                .color(ACCENT_CYAN),
+                                .color(pal.accent_cyan),
                         );
                     });
                 } else if let Some(summary) = &self.clean_summary {
@@ -1562,10 +1814,11 @@ impl RustCleanerApp {
                             if non_empty.is_empty() {
                                 draw_empty_state(
                                     ui,
+                                    pal,
                                     VectorIcon::CheckShield,
-                                    ACCENT_EMERALD,
-                                    "Sistema Pulito",
-                                    "Nessun file superfluo rilevato nelle categorie selezionate.",
+                                    pal.accent_emerald,
+                                    s.cleaner_empty_clean_title,
+                                    s.cleaner_empty_clean_desc,
                                 );
                             }
 
@@ -1576,20 +1829,24 @@ impl RustCleanerApp {
                                 } else {
                                     0.0
                                 };
+                                let disp_name = current_lang
+                                    .localize_rule(res.rule_id)
+                                    .map(|(n, _)| n)
+                                    .unwrap_or(&res.rule_name);
 
                                 egui::Frame::new()
-                                    .fill(BG_CARD_SUBTLE)
-                                    .stroke(Stroke::new(1.0, BORDER_SUBTLE))
+                                    .fill(pal.bg_card_subtle)
+                                    .stroke(Stroke::new(1.0, pal.border_subtle))
                                     .corner_radius(CornerRadius::same(8))
                                     .inner_margin(egui::Margin::symmetric(10, 7))
                                     .show(ui, |ui| {
                                         ui.set_width(ui.available_width());
                                         ui.horizontal(|ui| {
                                             ui.label(
-                                                RichText::new(&res.rule_name)
+                                                RichText::new(disp_name)
                                                     .size(13.0)
                                                     .strong()
-                                                    .color(TEXT_PRIMARY),
+                                                    .color(pal.text_primary),
                                             );
                                             ui.with_layout(
                                                 egui::Layout::right_to_left(egui::Align::Center),
@@ -1598,19 +1855,22 @@ impl RustCleanerApp {
                                                         ui,
                                                         &format_bytes(res.total_bytes),
                                                         Color32::from_rgba_unmultiplied(
-                                                            56, 189, 248, 35,
+                                                            pal.accent_cyan.r(),
+                                                            pal.accent_cyan.g(),
+                                                            pal.accent_cyan.b(),
+                                                            32,
                                                         ),
-                                                        ACCENT_CYAN,
+                                                        pal.accent_cyan,
                                                     );
                                                     ui.label(
                                                         RichText::new(format!(
-                                                            "{} file ({} in uso)",
+                                                            "{} ({})",
                                                             res.files.len(),
                                                             res.locked_count
                                                         ))
                                                         .size(11.0)
                                                         .monospace()
-                                                        .color(TEXT_SECONDARY),
+                                                        .color(pal.text_secondary),
                                                     );
                                                 },
                                             );
@@ -1623,40 +1883,46 @@ impl RustCleanerApp {
                                         ui.painter().rect_filled(
                                             p_rect,
                                             CornerRadius::same(2),
-                                            Color32::from_rgb(32, 40, 56),
+                                            pal.bg_track,
                                         );
                                         let mut fill_r = p_rect;
                                         fill_r.set_width(p_rect.width() * ratio);
                                         ui.painter().rect_filled(
                                             fill_r,
                                             CornerRadius::same(2),
-                                            ACCENT_CYAN,
+                                            pal.accent_cyan,
                                         );
 
                                         ui.collapsing(
-                                            RichText::new("Mostra elenco file")
+                                            RichText::new(s.cleaner_show_files)
                                                 .size(11.0)
-                                                .color(TEXT_MUTED),
+                                                .color(pal.text_muted),
                                             |ui| {
                                                 for f in res.files.iter().take(50) {
                                                     ui.horizontal(|ui| {
                                                         if f.locked_or_denied {
                                                             draw_pill_badge(
                                                                 ui,
-                                                                "IN USO",
+                                                                s.badge_in_use,
                                                                 Color32::from_rgba_unmultiplied(
-                                                                    245, 158, 11, 30,
+                                                                    pal.accent_amber.r(),
+                                                                    pal.accent_amber.g(),
+                                                                    pal.accent_amber.b(),
+                                                                    28,
                                                                 ),
-                                                                ACCENT_AMBER,
+                                                                pal.accent_amber,
                                                             );
                                                         } else {
                                                             draw_pill_badge(
                                                                 ui,
-                                                                "PRONTO",
+                                                                s.badge_ready_ok,
                                                                 Color32::from_rgba_unmultiplied(
-                                                                    34, 197, 94, 25,
+                                                                    pal.accent_emerald.r(),
+                                                                    pal.accent_emerald.g(),
+                                                                    pal.accent_emerald.b(),
+                                                                    25,
                                                                 ),
-                                                                ACCENT_EMERALD,
+                                                                pal.accent_emerald,
                                                             );
                                                         }
                                                         let full = format!(
@@ -1669,7 +1935,7 @@ impl RustCleanerApp {
                                                                 RichText::new(&full)
                                                                     .size(10.5)
                                                                     .monospace()
-                                                                    .color(TEXT_SECONDARY),
+                                                                    .color(pal.text_secondary),
                                                             )
                                                             .truncate(),
                                                         )
@@ -1685,10 +1951,11 @@ impl RustCleanerApp {
                 } else {
                     draw_empty_state(
                         ui,
+                        pal,
                         VectorIcon::CleanerSweep,
-                        ACCENT_CYAN,
-                        "Pronto per l'Analisi del Sistema",
-                        "Clicca su 'Analizza Sistema' in alto a destra per calcolare lo spazio recuperabile\nsenza eliminare alcun file.",
+                        pal.accent_cyan,
+                        s.cleaner_ready_title,
+                        s.cleaner_ready_desc,
                     );
                 }
             });
@@ -1696,12 +1963,9 @@ impl RustCleanerApp {
     }
 
     fn start_cleaner_job(&mut self, delete_files: bool) {
+        let s = self.language.strings();
         self.cleaner_busy = true;
-        self.status_banner = if delete_files {
-            "Pulizia parallela del File System in corso...".to_string()
-        } else {
-            "Analisi parallela del File System in corso...".to_string()
-        };
+        self.status_banner = s.cleaner_scanning_msg.to_string();
         let rules_clone = self.clean_rules.clone();
         let rx_slot = Arc::clone(&self.cleaner_result_rx);
         thread::spawn(move || {
@@ -1716,28 +1980,29 @@ impl RustCleanerApp {
         });
     }
 
-    fn render_registry_tab(&mut self, ui: &mut egui::Ui) {
+    fn render_registry_tab(&mut self, ui: &mut egui::Ui, pal: &ThemePalette) {
+        let s = self.language.strings();
+
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
                 ui.label(
-                    RichText::new("Manutenzione del Registro di Windows")
+                    RichText::new(s.reg_title)
                         .size(19.0)
                         .strong()
-                        .color(TEXT_PRIMARY),
+                        .color(pal.text_primary),
                 );
                 ui.label(
-                    RichText::new(
-                        "Ricerca chiavi orfane con esportazione automatica di sicurezza .reg (Windows Registry Editor 5.00).",
-                    )
-                    .size(12.0)
-                    .color(TEXT_SECONDARY),
+                    RichText::new(s.reg_subtitle)
+                        .size(12.0)
+                        .color(pal.text_secondary),
                 );
             });
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if draw_action_button(
                     ui,
-                    "Backup .reg + Ripara",
+                    pal,
+                    s.btn_backup_fix_reg,
                     VectorIcon::CheckShield,
                     ButtonVariant::ExecuteBrand,
                     !self.reg_issues.is_empty(),
@@ -1746,10 +2011,10 @@ impl RustCleanerApp {
                         Ok(report) => {
                             self.reg_last_backup = Some(report.backup_file.clone());
                             self.status_banner = format!(
-                                "Backup salvato in '{}' — Riparate {} voci ({} errori).",
+                                "{} '{}' ({} fixed).",
+                                s.reg_last_backup_prefix,
                                 report.backup_file.display(),
                                 report.fixed_count,
-                                report.failed_count
                             );
                             let active_cats: Vec<RegistryCategory> = self
                                 .reg_categories
@@ -1765,7 +2030,8 @@ impl RustCleanerApp {
 
                 if draw_action_button(
                     ui,
-                    "Esporta .reg",
+                    pal,
+                    s.btn_export_reg,
                     VectorIcon::DriveCylinder,
                     ButtonVariant::Secondary,
                     !self.reg_issues.is_empty(),
@@ -1773,7 +2039,7 @@ impl RustCleanerApp {
                     match export_reg_backup(&self.reg_issues, &self.reg_backup_dir) {
                         Ok(path) => {
                             self.status_banner =
-                                format!("Backup del Registro esportato in: {}", path.display());
+                                format!("{} {}", s.reg_last_backup_prefix, path.display());
                             self.reg_last_backup = Some(path);
                         }
                         Err(e) => self.status_banner = e,
@@ -1782,7 +2048,8 @@ impl RustCleanerApp {
 
                 if draw_action_button(
                     ui,
-                    "Scansiona Registro",
+                    pal,
+                    s.btn_scan_reg,
                     VectorIcon::SearchLens,
                     ButtonVariant::PrimaryScan,
                     true,
@@ -1794,24 +2061,22 @@ impl RustCleanerApp {
                         .map(|(c, _)| *c)
                         .collect();
                     self.reg_issues = scan_registry(&active_cats);
-                    self.status_banner = format!(
-                        "Scansione Registro completata: trovate {} incongruenze/chiavi orfane.",
-                        self.reg_issues.len()
-                    );
+                    self.status_banner =
+                        format!("{} ({})", s.reg_title, self.reg_issues.len());
                 }
             });
         });
 
         ui.add_space(8.0);
 
-        card_frame().show(ui, |ui| {
+        card_frame(pal).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal_wrapped(|ui| {
                 ui.label(
-                    RichText::new("Categorie Hive:")
+                    RichText::new(s.reg_hive_categories)
                         .size(12.0)
                         .strong()
-                        .color(TEXT_SECONDARY),
+                        .color(pal.text_secondary),
                 );
                 for (cat, enabled) in &mut self.reg_categories {
                     let cb = ui.checkbox(enabled, cat.code());
@@ -1824,12 +2089,13 @@ impl RustCleanerApp {
                 ui.add_space(4.0);
                 ui.label(
                     RichText::new(format!(
-                        "Ultimo file di ripristino .reg generato: {}",
+                        "{} {}",
+                        s.reg_last_backup_prefix,
                         last_bak.display()
                     ))
                     .size(11.5)
                     .monospace()
-                    .color(ACCENT_EMERALD),
+                    .color(pal.accent_emerald),
                 );
             }
         });
@@ -1837,7 +2103,7 @@ impl RustCleanerApp {
         ui.add_space(8.0);
 
         let list_h = (ui.available_height() - 10.0).max(220.0);
-        card_frame().show(ui, |ui| {
+        card_frame(pal).show(ui, |ui| {
             ui.set_height(list_h);
             egui::ScrollArea::vertical()
                 .id_salt("reg_issues_scroll")
@@ -1846,16 +2112,17 @@ impl RustCleanerApp {
                     if self.reg_issues.is_empty() {
                         draw_empty_state(
                             ui,
+                            pal,
                             VectorIcon::RegistryGrid,
-                            ACCENT_AMBER,
-                            "Nessuna Incongruenza Visualizzata",
-                            "Clicca su 'Scansiona Registro' in alto a destra per cercare riferimenti orfani in HKCU, HKLM e HKCR.",
+                            pal.accent_amber,
+                            s.reg_empty_title,
+                            s.reg_empty_desc,
                         );
                     } else {
                         for issue in &mut self.reg_issues {
                             egui::Frame::new()
-                                .fill(BG_CARD_SUBTLE)
-                                .stroke(Stroke::new(1.0, BORDER_SUBTLE))
+                                .fill(pal.bg_card_subtle)
+                                .stroke(Stroke::new(1.0, pal.border_subtle))
                                 .corner_radius(CornerRadius::same(8))
                                 .inner_margin(egui::Margin::symmetric(12, 8))
                                 .show(ui, |ui| {
@@ -1869,29 +2136,34 @@ impl RustCleanerApp {
                                         draw_pill_badge(
                                             ui,
                                             issue.category.code(),
-                                            Color32::from_rgba_unmultiplied(249, 115, 22, 35),
-                                            ACCENT_RUST,
+                                            Color32::from_rgba_unmultiplied(
+                                                pal.accent_rust.r(),
+                                                pal.accent_rust.g(),
+                                                pal.accent_rust.b(),
+                                                32,
+                                            ),
+                                            pal.accent_rust,
                                         );
                                         ui.label(
                                             RichText::new(&issue.problem_description)
                                                 .size(13.0)
                                                 .strong()
-                                                .color(TEXT_PRIMARY),
+                                                .color(pal.text_primary),
                                         );
                                         ui.label(
                                             RichText::new(&issue.data_reference)
                                                 .size(12.0)
                                                 .monospace()
-                                                .color(ACCENT_CYAN),
+                                                .color(pal.accent_cyan),
                                         );
                                     });
                                     let reg_p = issue.full_reg_path();
                                     ui.add(
                                         egui::Label::new(
-                                            RichText::new(format!("Percorso: {reg_p}"))
+                                            RichText::new(format!("{} {reg_p}", s.reg_path_prefix))
                                                 .size(11.0)
                                                 .monospace()
-                                                .color(TEXT_MUTED),
+                                                .color(pal.text_muted),
                                         )
                                         .truncate(),
                                     )
@@ -1904,31 +2176,31 @@ impl RustCleanerApp {
         });
     }
 
-    fn render_startup_tab(&mut self, ui: &mut egui::Ui) {
+    fn render_startup_tab(&mut self, ui: &mut egui::Ui, pal: &ThemePalette) {
+        let s = self.language.strings();
         let active_count = self.startup_entries.iter().filter(|e| e.enabled).count();
         let disabled_count = self.startup_entries.len().saturating_sub(active_count);
 
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
                 ui.label(
-                    RichText::new("Gestione dell'Avvio Automatico (Startup Manager)")
+                    RichText::new(s.startup_title)
                         .size(19.0)
                         .strong()
-                        .color(TEXT_PRIMARY),
+                        .color(pal.text_primary),
                 );
                 ui.label(
-                    RichText::new(
-                        "Controlla le applicazioni che partono con Windows tramite Run, RunOnce e i flag binari StartupApproved.",
-                    )
-                    .size(12.0)
-                    .color(TEXT_SECONDARY),
+                    RichText::new(s.startup_subtitle)
+                        .size(12.0)
+                        .color(pal.text_secondary),
                 );
             });
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if draw_action_button(
                     ui,
-                    "Aggiorna Elenco",
+                    pal,
+                    s.btn_refresh_list,
                     VectorIcon::RefreshSync,
                     ButtonVariant::Secondary,
                     true,
@@ -1940,32 +2212,47 @@ impl RustCleanerApp {
 
         ui.add_space(8.0);
 
-        card_frame().show(ui, |ui| {
+        card_frame(pal).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 draw_pill_badge(
                     ui,
-                    &format!("Totale: {}", self.startup_entries.len()),
-                    Color32::from_rgba_unmultiplied(56, 189, 248, 30),
-                    ACCENT_CYAN,
+                    &format!("{}: {}", s.badge_total, self.startup_entries.len()),
+                    Color32::from_rgba_unmultiplied(
+                        pal.accent_cyan.r(),
+                        pal.accent_cyan.g(),
+                        pal.accent_cyan.b(),
+                        28,
+                    ),
+                    pal.accent_cyan,
                 );
                 draw_pill_badge(
                     ui,
-                    &format!("Attive: {active_count}"),
-                    Color32::from_rgba_unmultiplied(34, 197, 94, 30),
-                    ACCENT_EMERALD,
+                    &format!("{}: {active_count}", s.badge_active),
+                    Color32::from_rgba_unmultiplied(
+                        pal.accent_emerald.r(),
+                        pal.accent_emerald.g(),
+                        pal.accent_emerald.b(),
+                        28,
+                    ),
+                    pal.accent_emerald,
                 );
                 draw_pill_badge(
                     ui,
-                    &format!("Disabilitate: {disabled_count}"),
-                    Color32::from_rgba_unmultiplied(245, 158, 11, 30),
-                    ACCENT_AMBER,
+                    &format!("{}: {disabled_count}", s.badge_disabled),
+                    Color32::from_rgba_unmultiplied(
+                        pal.accent_amber.r(),
+                        pal.accent_amber.g(),
+                        pal.accent_amber.b(),
+                        28,
+                    ),
+                    pal.accent_amber,
                 );
                 ui.separator();
-                ui.label(RichText::new("Filtra:").color(TEXT_SECONDARY));
+                ui.label(RichText::new(s.lbl_filter).color(pal.text_secondary));
                 ui.add(
                     egui::TextEdit::singleline(&mut self.startup_filter)
-                        .hint_text("Cerca per nome o eseguibile...")
+                        .hint_text(s.startup_filter_hint)
                         .desired_width(250.0),
                 );
             });
@@ -1977,7 +2264,7 @@ impl RustCleanerApp {
         let mut delete_req: Option<StartupEntry> = None;
 
         let list_h = (ui.available_height() - 10.0).max(220.0);
-        card_frame().show(ui, |ui| {
+        card_frame(pal).show(ui, |ui| {
             ui.set_height(list_h);
             egui::ScrollArea::vertical()
                 .id_salt("startup_scroll")
@@ -1991,8 +2278,8 @@ impl RustCleanerApp {
                             continue;
                         }
                         egui::Frame::new()
-                            .fill(BG_CARD_SUBTLE)
-                            .stroke(Stroke::new(1.0, BORDER_SUBTLE))
+                            .fill(pal.bg_card_subtle)
+                            .stroke(Stroke::new(1.0, pal.border_subtle))
                             .corner_radius(CornerRadius::same(8))
                             .inner_margin(egui::Margin::symmetric(12, 9))
                             .show(ui, |ui| {
@@ -2001,29 +2288,44 @@ impl RustCleanerApp {
                                     if entry.enabled {
                                         draw_pill_badge(
                                             ui,
-                                            "ATTIVO",
-                                            Color32::from_rgba_unmultiplied(34, 197, 94, 35),
-                                            ACCENT_EMERALD,
+                                            s.pill_enabled,
+                                            Color32::from_rgba_unmultiplied(
+                                                pal.accent_emerald.r(),
+                                                pal.accent_emerald.g(),
+                                                pal.accent_emerald.b(),
+                                                32,
+                                            ),
+                                            pal.accent_emerald,
                                         );
                                     } else {
                                         draw_pill_badge(
                                             ui,
-                                            "DISABILITATO",
-                                            Color32::from_rgba_unmultiplied(245, 158, 11, 35),
-                                            ACCENT_AMBER,
+                                            s.pill_disabled,
+                                            Color32::from_rgba_unmultiplied(
+                                                pal.accent_amber.r(),
+                                                pal.accent_amber.g(),
+                                                pal.accent_amber.b(),
+                                                32,
+                                            ),
+                                            pal.accent_amber,
                                         );
                                     }
                                     draw_pill_badge(
                                         ui,
                                         entry.source.key_label(),
-                                        Color32::from_rgba_unmultiplied(56, 189, 248, 25),
-                                        ACCENT_CYAN,
+                                        Color32::from_rgba_unmultiplied(
+                                            pal.accent_cyan.r(),
+                                            pal.accent_cyan.g(),
+                                            pal.accent_cyan.b(),
+                                            25,
+                                        ),
+                                        pal.accent_cyan,
                                     );
                                     ui.label(
                                         RichText::new(&entry.name)
                                             .size(14.0)
                                             .strong()
-                                            .color(TEXT_PRIMARY),
+                                            .color(pal.text_primary),
                                     );
 
                                     ui.with_layout(
@@ -2031,7 +2333,8 @@ impl RustCleanerApp {
                                         |ui| {
                                             if draw_action_button(
                                                 ui,
-                                                "Elimina",
+                                                pal,
+                                                s.btn_delete,
                                                 VectorIcon::TrashDelete,
                                                 ButtonVariant::Danger,
                                                 true,
@@ -2039,12 +2342,13 @@ impl RustCleanerApp {
                                                 delete_req = Some(entry.clone());
                                             }
                                             let (toggle_label, variant) = if entry.enabled {
-                                                ("Disabilita", ButtonVariant::Secondary)
+                                                (s.btn_disable, ButtonVariant::Secondary)
                                             } else {
-                                                ("Abilita", ButtonVariant::PrimaryScan)
+                                                (s.btn_enable, ButtonVariant::PrimaryScan)
                                             };
                                             if draw_action_button(
                                                 ui,
+                                                pal,
                                                 toggle_label,
                                                 VectorIcon::StartupBolt,
                                                 variant,
@@ -2056,13 +2360,13 @@ impl RustCleanerApp {
                                     );
                                 });
                                 ui.add_space(2.0);
-                                let cmd_str = format!("Comando: {}", entry.command);
+                                let cmd_str = format!("{} {}", s.lbl_command, entry.command);
                                 ui.add(
                                     egui::Label::new(
                                         RichText::new(&cmd_str)
                                             .size(11.0)
                                             .monospace()
-                                            .color(TEXT_MUTED),
+                                            .color(pal.text_muted),
                                     )
                                     .truncate(),
                                 )
@@ -2077,9 +2381,13 @@ impl RustCleanerApp {
             match set_startup_enabled(&entry, new_state) {
                 Ok(()) => {
                     self.status_banner = format!(
-                        "Voce di avvio '{}' impostata su {}.",
+                        "'{}' -> {}",
                         entry.name,
-                        if new_state { "ATTIVA" } else { "DISABILITATA" }
+                        if new_state {
+                            s.pill_enabled
+                        } else {
+                            s.pill_disabled
+                        }
                     );
                     self.startup_entries = list_startup_entries();
                 }
@@ -2089,7 +2397,7 @@ impl RustCleanerApp {
         if let Some(entry) = delete_req {
             match delete_startup_entry(&entry) {
                 Ok(()) => {
-                    self.status_banner = format!("Voce di avvio '{}' eliminata.", entry.name);
+                    self.status_banner = format!("'{}' deleted.", entry.name);
                     self.startup_entries = list_startup_entries();
                 }
                 Err(e) => self.status_banner = e,
@@ -2097,28 +2405,29 @@ impl RustCleanerApp {
         }
     }
 
-    fn render_uninstaller_tab(&mut self, ui: &mut egui::Ui) {
+    fn render_uninstaller_tab(&mut self, ui: &mut egui::Ui, pal: &ThemePalette) {
+        let s = self.language.strings();
+
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
                 ui.label(
-                    RichText::new("Disinstallazione Software (Uninstaller Manager)")
+                    RichText::new(s.uninst_title)
                         .size(19.0)
                         .strong()
-                        .color(TEXT_PRIMARY),
+                        .color(pal.text_primary),
                 );
                 ui.label(
-                    RichText::new(
-                        "Elenco completo delle applicazioni installate (64-bit, 32-bit WOW6432Node e Utente) con avvio diretto dell'uninstaller.",
-                    )
-                    .size(12.0)
-                    .color(TEXT_SECONDARY),
+                    RichText::new(s.uninst_subtitle)
+                        .size(12.0)
+                        .color(pal.text_secondary),
                 );
             });
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if draw_action_button(
                     ui,
-                    "Aggiorna Lista",
+                    pal,
+                    s.btn_refresh_list,
                     VectorIcon::RefreshSync,
                     ButtonVariant::Secondary,
                     true,
@@ -2130,20 +2439,25 @@ impl RustCleanerApp {
 
         ui.add_space(8.0);
 
-        card_frame().show(ui, |ui| {
+        card_frame(pal).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 draw_pill_badge(
                     ui,
-                    &format!("{} Applicazioni Rilevate", self.installed_apps.len()),
-                    Color32::from_rgba_unmultiplied(168, 85, 247, 35),
-                    ACCENT_PURPLE,
+                    &format!("{} {}", self.installed_apps.len(), s.badge_apps_detected),
+                    Color32::from_rgba_unmultiplied(
+                        pal.accent_purple.r(),
+                        pal.accent_purple.g(),
+                        pal.accent_purple.b(),
+                        32,
+                    ),
+                    pal.accent_purple,
                 );
                 ui.separator();
-                ui.label(RichText::new("Cerca:").color(TEXT_SECONDARY));
+                ui.label(RichText::new(s.lbl_filter).color(pal.text_secondary));
                 ui.add(
                     egui::TextEdit::singleline(&mut self.uninstall_filter)
-                        .hint_text("Filtra per nome software o produttore...")
+                        .hint_text(s.uninst_filter_hint)
                         .desired_width(280.0),
                 );
             });
@@ -2154,7 +2468,7 @@ impl RustCleanerApp {
         let mut launch_req: Option<InstalledApp> = None;
 
         let list_h = (ui.available_height() - 10.0).max(220.0);
-        card_frame().show(ui, |ui| {
+        card_frame(pal).show(ui, |ui| {
             ui.set_height(list_h);
             egui::ScrollArea::vertical()
                 .id_salt("uninstaller_scroll")
@@ -2168,8 +2482,8 @@ impl RustCleanerApp {
                             continue;
                         }
                         egui::Frame::new()
-                            .fill(BG_CARD_SUBTLE)
-                            .stroke(Stroke::new(1.0, BORDER_SUBTLE))
+                            .fill(pal.bg_card_subtle)
+                            .stroke(Stroke::new(1.0, pal.border_subtle))
                             .corner_radius(CornerRadius::same(8))
                             .inner_margin(egui::Margin::symmetric(12, 9))
                             .show(ui, |ui| {
@@ -2181,16 +2495,19 @@ impl RustCleanerApp {
                                                 RichText::new(&app.display_name)
                                                     .size(14.0)
                                                     .strong()
-                                                    .color(TEXT_PRIMARY),
+                                                    .color(pal.text_primary),
                                             );
                                             if !app.display_version.is_empty() {
                                                 draw_pill_badge(
                                                     ui,
                                                     &format!("v{}", app.display_version),
                                                     Color32::from_rgba_unmultiplied(
-                                                        56, 189, 248, 30,
+                                                        pal.accent_cyan.r(),
+                                                        pal.accent_cyan.g(),
+                                                        pal.accent_cyan.b(),
+                                                        28,
                                                     ),
-                                                    ACCENT_CYAN,
+                                                    pal.accent_cyan,
                                                 );
                                             }
                                             if let Some(kb) = app.estimated_size_kb {
@@ -2198,26 +2515,30 @@ impl RustCleanerApp {
                                                     ui,
                                                     &format!("{:.1} MB", kb as f64 / 1024.0),
                                                     Color32::from_rgba_unmultiplied(
-                                                        34, 197, 94, 30,
+                                                        pal.accent_emerald.r(),
+                                                        pal.accent_emerald.g(),
+                                                        pal.accent_emerald.b(),
+                                                        28,
                                                     ),
-                                                    ACCENT_EMERALD,
+                                                    pal.accent_emerald,
                                                 );
                                             }
                                             if !app.publisher.is_empty() {
                                                 ui.label(
                                                     RichText::new(format!("• {}", app.publisher))
                                                         .size(11.5)
-                                                        .color(TEXT_SECONDARY),
+                                                        .color(pal.text_secondary),
                                                 );
                                             }
                                         });
-                                        let u_cmd = format!("Comando: {}", app.uninstall_string);
+                                        let u_cmd =
+                                            format!("{} {}", s.lbl_command, app.uninstall_string);
                                         ui.add(
                                             egui::Label::new(
                                                 RichText::new(&u_cmd)
                                                     .size(10.5)
                                                     .monospace()
-                                                    .color(TEXT_MUTED),
+                                                    .color(pal.text_muted),
                                             )
                                             .truncate(),
                                         )
@@ -2229,7 +2550,8 @@ impl RustCleanerApp {
                                         |ui| {
                                             if draw_action_button(
                                                 ui,
-                                                "Disinstalla",
+                                                pal,
+                                                s.btn_uninstall,
                                                 VectorIcon::UninstallerBox,
                                                 ButtonVariant::Danger,
                                                 true,
@@ -2253,30 +2575,31 @@ impl RustCleanerApp {
         }
     }
 
-    fn render_wiper_tab(&mut self, ui: &mut egui::Ui) {
+    fn render_wiper_tab(&mut self, ui: &mut egui::Ui, pal: &ThemePalette) {
+        let s = self.language.strings();
+        let current_lang = self.language;
+
         ui.label(
-            RichText::new("Bonifica dello Spazio Libero (Drive Wiper)")
+            RichText::new(s.wiper_title)
                 .size(19.0)
                 .strong()
-                .color(TEXT_PRIMARY),
+                .color(pal.text_primary),
         );
         ui.label(
-            RichText::new(
-                "Sovrascrittura sicura dello spazio non allocato con blocchi da 4 MB e flag nativo FILE_FLAG_WRITE_THROUGH (bypass cache OS).",
-            )
-            .size(12.0)
-            .color(TEXT_SECONDARY),
+            RichText::new(s.wiper_subtitle)
+                .size(12.0)
+                .color(pal.text_secondary),
         );
         ui.add_space(10.0);
 
         ui.columns(2, |cols| {
-            card_frame().show(&mut cols[0], |ui| {
+            card_frame(pal).show(&mut cols[0], |ui| {
                 ui.set_width(ui.available_width());
                 ui.label(
-                    RichText::new("1. Seleziona Volume Disco")
+                    RichText::new(s.wiper_step1_hdr)
                         .size(14.5)
                         .strong()
-                        .color(TEXT_PRIMARY),
+                        .color(pal.text_primary),
                 );
                 ui.separator();
 
@@ -2290,13 +2613,17 @@ impl RustCleanerApp {
 
                     egui::Frame::new()
                         .fill(if is_sel {
-                            BG_CARD_HOVER
+                            pal.bg_card_hover
                         } else {
-                            BG_CARD_SUBTLE
+                            pal.bg_card_subtle
                         })
                         .stroke(Stroke::new(
                             1.2,
-                            if is_sel { ACCENT_CYAN } else { BORDER_SUBTLE },
+                            if is_sel {
+                                pal.accent_cyan
+                            } else {
+                                pal.border_subtle
+                            },
                         ))
                         .corner_radius(CornerRadius::same(8))
                         .inner_margin(egui::Margin::symmetric(12, 9))
@@ -2306,9 +2633,12 @@ impl RustCleanerApp {
                                 let rb = ui.radio_value(
                                     &mut self.selected_drive_idx,
                                     idx,
-                                    RichText::new(format!("Disco {}", d.root_path))
-                                        .size(14.0)
-                                        .strong(),
+                                    RichText::new(format!(
+                                        "{} {}",
+                                        s.wiper_drive_prefix, d.root_path
+                                    ))
+                                    .size(14.0)
+                                    .strong(),
                                 );
                                 if rb.hovered() {
                                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -2318,9 +2648,18 @@ impl RustCleanerApp {
                                     |ui| {
                                         draw_pill_badge(
                                             ui,
-                                            &format!("Libero: {}", format_bytes(d.free_bytes)),
-                                            Color32::from_rgba_unmultiplied(34, 197, 94, 35),
-                                            ACCENT_EMERALD,
+                                            &format!(
+                                                "{}: {}",
+                                                s.drive_free_label,
+                                                format_bytes(d.free_bytes)
+                                            ),
+                                            Color32::from_rgba_unmultiplied(
+                                                pal.accent_emerald.r(),
+                                                pal.accent_emerald.g(),
+                                                pal.accent_emerald.b(),
+                                                32,
+                                            ),
+                                            pal.accent_emerald,
                                         );
                                     },
                                 );
@@ -2333,39 +2672,40 @@ impl RustCleanerApp {
                             ui.painter().rect_filled(
                                 bar_rect,
                                 CornerRadius::same(4),
-                                Color32::from_rgb(35, 45, 62),
+                                pal.bg_track,
                             );
                             let mut used_rect = bar_rect;
                             used_rect.set_width(bar_rect.width() * used_ratio);
                             ui.painter().rect_filled(
                                 used_rect,
                                 CornerRadius::same(4),
-                                ACCENT_CYAN,
+                                pal.accent_cyan,
                             );
 
                             ui.label(
                                 RichText::new(format!(
-                                    "Usato: {} ({:.0}%) su {} totali",
+                                    "{}: {} ({:.0}%) / {}",
+                                    s.wiper_used_summary,
                                     format_bytes(d.used_bytes),
                                     used_ratio * 100.0,
                                     format_bytes(d.total_bytes)
                                 ))
                                 .size(11.0)
                                 .monospace()
-                                .color(TEXT_MUTED),
+                                .color(pal.text_muted),
                             );
                         });
                     ui.add_space(5.0);
                 }
             });
 
-            card_frame().show(&mut cols[1], |ui| {
+            card_frame(pal).show(&mut cols[1], |ui| {
                 ui.set_width(ui.available_width());
                 ui.label(
-                    RichText::new("2. Algoritmo di Sicurezza & Opzioni")
+                    RichText::new(s.wiper_step2_hdr)
                         .size(14.5)
                         .strong()
-                        .color(TEXT_PRIMARY),
+                        .color(pal.text_primary),
                 );
                 ui.separator();
 
@@ -2373,13 +2713,17 @@ impl RustCleanerApp {
                     let is_sel = self.wipe_algorithm == alg;
                     egui::Frame::new()
                         .fill(if is_sel {
-                            BG_CARD_HOVER
+                            pal.bg_card_hover
                         } else {
-                            BG_CARD_SUBTLE
+                            pal.bg_card_subtle
                         })
                         .stroke(Stroke::new(
                             1.2,
-                            if is_sel { ACCENT_RUST } else { BORDER_SUBTLE },
+                            if is_sel {
+                                pal.accent_rust
+                            } else {
+                                pal.border_subtle
+                            },
                         ))
                         .corner_radius(CornerRadius::same(8))
                         .inner_margin(egui::Margin::symmetric(10, 7))
@@ -2388,7 +2732,9 @@ impl RustCleanerApp {
                             let rb = ui.radio_value(
                                 &mut self.wipe_algorithm,
                                 alg,
-                                RichText::new(alg.label()).size(13.0).strong(),
+                                RichText::new(current_lang.localize_wipe_alg(alg))
+                                    .size(13.0)
+                                    .strong(),
                             );
                             if rb.hovered() {
                                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -2398,16 +2744,10 @@ impl RustCleanerApp {
                 }
 
                 ui.add_space(4.0);
-                ui.checkbox(
-                    &mut self.wipe_mft_slack,
-                    "Bonifica anche i record liberi della Master File Table (MFT Slack)",
-                );
+                ui.checkbox(&mut self.wipe_mft_slack, s.wiper_mft_checkbox);
 
                 ui.horizontal(|ui| {
-                    ui.checkbox(
-                        &mut self.wipe_limit_mb_enabled,
-                        "Limite di sicurezza (MB):",
-                    );
+                    ui.checkbox(&mut self.wipe_limit_mb_enabled, s.wiper_limit_checkbox);
                     if self.wipe_limit_mb_enabled {
                         ui.add(
                             egui::DragValue::new(&mut self.wipe_limit_mb)
@@ -2417,9 +2757,14 @@ impl RustCleanerApp {
                     } else {
                         draw_pill_badge(
                             ui,
-                            "100% Spazio Libero (-512 MB margine OS)",
-                            Color32::from_rgba_unmultiplied(245, 158, 11, 35),
-                            ACCENT_AMBER,
+                            s.wiper_full_free_badge,
+                            Color32::from_rgba_unmultiplied(
+                                pal.accent_amber.r(),
+                                pal.accent_amber.g(),
+                                pal.accent_amber.b(),
+                                32,
+                            ),
+                            pal.accent_amber,
                         );
                     }
                 });
@@ -2429,12 +2774,13 @@ impl RustCleanerApp {
         ui.add_space(10.0);
         let prog_snapshot = self.wipe_progress.lock().unwrap().clone();
 
-        card_frame().show(ui, |ui| {
+        card_frame(pal).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 if draw_action_button(
                     ui,
-                    "Avvia Bonifica Spazio Libero",
+                    pal,
+                    s.btn_start_wipe,
                     VectorIcon::DriveCylinder,
                     ButtonVariant::ExecuteBrand,
                     !prog_snapshot.running,
@@ -2474,7 +2820,8 @@ impl RustCleanerApp {
                 if prog_snapshot.running
                     && draw_action_button(
                         ui,
-                        "Interrompi Subito e Rilascia Spazio",
+                        pal,
+                        s.btn_stop_wipe,
                         VectorIcon::StopOctagon,
                         ButtonVariant::Danger,
                         true,
@@ -2498,7 +2845,7 @@ impl RustCleanerApp {
                         .text(&prog_snapshot.status_message),
                 );
                 if let Some(err) = &prog_snapshot.error {
-                    ui.label(RichText::new(err).color(ACCENT_RED));
+                    ui.label(RichText::new(err).color(pal.accent_red));
                 }
             }
         });
@@ -2506,9 +2853,9 @@ impl RustCleanerApp {
 
     // === 6. SOFTWARE UPDATER TAB (WINGET WRAPPER) ===
     fn start_winget_scan(&mut self) {
+        let s = self.language.strings();
         self.winget_busy = true;
-        self.status_banner =
-            "Ricerca aggiornamenti software tramite Microsoft Winget in corso...".to_string();
+        self.status_banner = s.soft_scanning_msg.to_string();
         let rx = Arc::clone(&self.winget_rx);
         thread::spawn(move || {
             let rep = check_for_updates();
@@ -2518,21 +2865,21 @@ impl RustCleanerApp {
         });
     }
 
-    fn render_software_updater_tab(&mut self, ui: &mut egui::Ui) {
+    fn render_software_updater_tab(&mut self, ui: &mut egui::Ui, pal: &ThemePalette) {
+        let s = self.language.strings();
+
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
                 ui.label(
-                    RichText::new("Software Updater (Microsoft Winget Nativo)")
+                    RichText::new(s.soft_title)
                         .size(19.0)
                         .strong()
-                        .color(TEXT_PRIMARY),
+                        .color(pal.text_primary),
                 );
                 ui.label(
-                    RichText::new(
-                        "Nessun database proprietario: interroga direttamente il Windows Package Manager ufficiale (winget upgrade).",
-                    )
-                    .size(12.0)
-                    .color(TEXT_SECONDARY),
+                    RichText::new(s.soft_subtitle)
+                        .size(12.0)
+                        .color(pal.text_secondary),
                 );
             });
 
@@ -2545,14 +2892,15 @@ impl RustCleanerApp {
 
                 if draw_action_button(
                     ui,
-                    "Aggiorna Tutto (--all --silent)",
+                    pal,
+                    s.btn_upgrade_all,
                     VectorIcon::SoftwareCloudUp,
                     ButtonVariant::ExecuteBrand,
                     !self.winget_busy && has_updates,
                 ) {
                     self.winget_busy = true;
                     self.status_banner =
-                        "Aggiornamento silenzioso di tutti i pacchetti Winget in corso (winget upgrade --all --silent)...".to_string();
+                        "winget upgrade --all --silent...".to_string();
                     let act_rx = Arc::clone(&self.winget_action_rx);
                     thread::spawn(move || {
                         let res = match upgrade_all_packages() {
@@ -2567,7 +2915,8 @@ impl RustCleanerApp {
 
                 if draw_action_button(
                     ui,
-                    "Cerca Aggiornamenti",
+                    pal,
+                    s.btn_check_updates,
                     VectorIcon::SearchLens,
                     ButtonVariant::PrimaryScan,
                     !self.winget_busy,
@@ -2581,40 +2930,43 @@ impl RustCleanerApp {
 
         let (count_str, ver_str) = if let Some(rep) = &self.winget_report {
             (
-                format!("{} software", rep.updates.len()),
+                format!("{}", rep.updates.len()),
                 if rep.winget_version.is_empty() {
-                    "Non trovato".to_string()
+                    "N/A".to_string()
                 } else {
                     rep.winget_version.clone()
                 },
             )
         } else {
-            ("—".to_string(), "Verifica...".to_string())
+            ("—".to_string(), "...".to_string())
         };
 
         ui.columns(3, |cols| {
             draw_kpi_card(
                 &mut cols[0],
-                "AGGIORNAMENTI DISPONIBILI",
+                pal,
+                s.kpi_updates_avail,
                 &count_str,
-                "Rilevati dal repository ufficiale",
-                ACCENT_CYAN,
+                s.kpi_updates_sub,
+                pal.accent_cyan,
                 VectorIcon::SoftwareCloudUp,
             );
             draw_kpi_card(
                 &mut cols[1],
-                "MOTORE WINGET NATIVO",
+                pal,
+                s.kpi_winget_engine,
                 &ver_str,
                 "Windows Package Manager",
-                ACCENT_EMERALD,
+                pal.accent_emerald,
                 VectorIcon::CheckShield,
             );
             draw_kpi_card(
                 &mut cols[2],
-                "SERVER PROPRIETARI",
+                pal,
+                s.kpi_prop_servers,
                 "0 (100% Free)",
-                "Zero abbonamenti • Zero telemetria",
-                ACCENT_PURPLE,
+                s.kpi_prop_servers_sub,
+                pal.accent_purple,
                 VectorIcon::BrandShield,
             );
         });
@@ -2622,13 +2974,13 @@ impl RustCleanerApp {
         ui.add_space(8.0);
 
         let list_h = (ui.available_height() - 10.0).max(220.0);
-        card_frame().show(ui, |ui| {
+        card_frame(pal).show(ui, |ui| {
             ui.set_height(list_h);
             ui.horizontal(|ui| {
-                ui.label(RichText::new("Filtra pacchetti:").color(TEXT_SECONDARY));
+                ui.label(RichText::new(s.lbl_filter).color(pal.text_secondary));
                 ui.add(
                     egui::TextEdit::singleline(&mut self.winget_filter)
-                        .hint_text("Cerca per nome o ID pacchetto...")
+                        .hint_text(s.soft_filter_hint)
                         .desired_width(280.0),
                 );
             });
@@ -2640,9 +2992,9 @@ impl RustCleanerApp {
                     ui.spinner();
                     ui.add_space(10.0);
                     ui.label(
-                        RichText::new("Interrogazione di Microsoft Winget in background...")
+                        RichText::new(s.soft_scanning_msg)
                             .size(14.0)
-                            .color(ACCENT_CYAN),
+                            .color(pal.accent_cyan),
                     );
                 });
             } else if let Some(rep) = &self.winget_report {
@@ -2656,9 +3008,10 @@ impl RustCleanerApp {
                         if rep.updates.is_empty() {
                             draw_empty_state(
                                 ui,
+                                pal,
                                 VectorIcon::CheckShield,
-                                ACCENT_EMERALD,
-                                "Tutti i Software sono Aggiornati",
+                                pal.accent_emerald,
+                                s.soft_all_up_to_date,
                                 &rep.raw_message,
                             );
                         } else {
@@ -2670,8 +3023,8 @@ impl RustCleanerApp {
                                     continue;
                                 }
                                 egui::Frame::new()
-                                    .fill(BG_CARD_SUBTLE)
-                                    .stroke(Stroke::new(1.0, BORDER_SUBTLE))
+                                    .fill(pal.bg_card_subtle)
+                                    .stroke(Stroke::new(1.0, pal.border_subtle))
                                     .corner_radius(CornerRadius::same(8))
                                     .inner_margin(egui::Margin::symmetric(12, 9))
                                     .show(ui, |ui| {
@@ -2683,38 +3036,52 @@ impl RustCleanerApp {
                                                         RichText::new(&pkg.name)
                                                             .size(14.0)
                                                             .strong()
-                                                            .color(TEXT_PRIMARY),
+                                                            .color(pal.text_primary),
                                                     );
                                                     draw_pill_badge(
                                                         ui,
-                                                        &format!("Attuale: {}", pkg.current_version),
-                                                        Color32::from_rgba_unmultiplied(
-                                                            245, 158, 11, 30,
+                                                        &format!(
+                                                            "{}: {}",
+                                                            s.badge_current_ver,
+                                                            pkg.current_version
                                                         ),
-                                                        ACCENT_AMBER,
+                                                        Color32::from_rgba_unmultiplied(
+                                                            pal.accent_amber.r(),
+                                                            pal.accent_amber.g(),
+                                                            pal.accent_amber.b(),
+                                                            28,
+                                                        ),
+                                                        pal.accent_amber,
                                                     );
                                                     ui.label(
                                                         RichText::new("->")
                                                             .monospace()
-                                                            .color(TEXT_MUTED),
+                                                            .color(pal.text_muted),
                                                     );
                                                     draw_pill_badge(
                                                         ui,
-                                                        &format!("Nuova: {}", pkg.available_version),
-                                                        Color32::from_rgba_unmultiplied(
-                                                            34, 197, 94, 35,
+                                                        &format!(
+                                                            "{}: {}",
+                                                            s.badge_new_ver,
+                                                            pkg.available_version
                                                         ),
-                                                        ACCENT_EMERALD,
+                                                        Color32::from_rgba_unmultiplied(
+                                                            pal.accent_emerald.r(),
+                                                            pal.accent_emerald.g(),
+                                                            pal.accent_emerald.b(),
+                                                            32,
+                                                        ),
+                                                        pal.accent_emerald,
                                                     );
                                                 });
                                                 ui.label(
                                                     RichText::new(format!(
-                                                        "ID Winget: {} • Sorgente: {}",
+                                                        "ID: {} • Source: {}",
                                                         pkg.id, pkg.source
                                                     ))
                                                     .size(10.5)
                                                     .monospace()
-                                                    .color(TEXT_MUTED),
+                                                    .color(pal.text_muted),
                                                 );
                                             });
 
@@ -2723,7 +3090,8 @@ impl RustCleanerApp {
                                                 |ui| {
                                                     if draw_action_button(
                                                         ui,
-                                                        "Aggiorna",
+                                                        pal,
+                                                        s.btn_upgrade_single,
                                                         VectorIcon::SoftwareCloudUp,
                                                         ButtonVariant::ExecuteBrand,
                                                         true,
@@ -2741,9 +3109,7 @@ impl RustCleanerApp {
 
                 if let Some(pkg_id) = single_upgrade_id {
                     self.winget_busy = true;
-                    self.status_banner = format!(
-                        "Aggiornamento silenzioso di '{pkg_id}' tramite Winget in corso..."
-                    );
+                    self.status_banner = format!("winget upgrade --id {pkg_id} --silent...");
                     let act_rx = Arc::clone(&self.winget_action_rx);
                     thread::spawn(move || {
                         let res = match upgrade_single_package(&pkg_id) {
@@ -2761,12 +3127,9 @@ impl RustCleanerApp {
 
     // === 7. DRIVER UPDATER TAB (WINDOWS UPDATE COM WUApiLib + PnP) ===
     fn start_driver_scan(&mut self, online_wu: bool) {
+        let s = self.language.strings();
         self.driver_busy = true;
-        self.status_banner = if online_wu {
-            "Interrogazione COM Microsoft.Update.Session (IsInstalled=0 and Type='Driver') sui server Windows Update...".to_string()
-        } else {
-            "Lettura dei driver hardware PnP firmati (WHQL) installati nel sistema...".to_string()
-        };
+        self.status_banner = s.drv_scanning_msg.to_string();
         let rx = Arc::clone(&self.driver_rx);
         thread::spawn(move || {
             let rep = scan_drivers(online_wu);
@@ -2776,21 +3139,21 @@ impl RustCleanerApp {
         });
     }
 
-    fn render_driver_updater_tab(&mut self, ui: &mut egui::Ui) {
+    fn render_driver_updater_tab(&mut self, ui: &mut egui::Ui, pal: &ThemePalette) {
+        let s = self.language.strings();
+
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
                 ui.label(
-                    RichText::new("Driver Updater Sicuro (Windows Update Agent COM)")
+                    RichText::new(s.drv_title)
                         .size(19.0)
                         .strong()
-                        .color(TEXT_PRIMARY),
+                        .color(pal.text_primary),
                 );
                 ui.label(
-                    RichText::new(
-                        "Zero database di terze parti: usa esclusivamente WUApiLib (Microsoft.Update.Session) per driver certificati WHQL.",
-                    )
-                    .size(12.0)
-                    .color(TEXT_SECONDARY),
+                    RichText::new(s.drv_subtitle)
+                        .size(12.0)
+                        .color(pal.text_secondary),
                 );
             });
 
@@ -2803,7 +3166,8 @@ impl RustCleanerApp {
 
                 if draw_action_button(
                     ui,
-                    "Installa Driver WU",
+                    pal,
+                    s.btn_install_wu_drivers,
                     VectorIcon::DriverChip,
                     ButtonVariant::ExecuteBrand,
                     !self.driver_busy && pending_count > 0,
@@ -2819,7 +3183,8 @@ impl RustCleanerApp {
 
                 if draw_action_button(
                     ui,
-                    "Cerca su Windows Update (WUApiLib)",
+                    pal,
+                    s.btn_scan_wu_drivers,
                     VectorIcon::SearchLens,
                     ButtonVariant::PrimaryScan,
                     !self.driver_busy,
@@ -2834,8 +3199,8 @@ impl RustCleanerApp {
         let (wu_count, pnp_count, signed_count) = if let Some(rep) = &self.driver_report {
             let signed = rep.installed_drivers.iter().filter(|d| d.is_signed).count();
             (
-                format!("{} da installare", rep.wu_pending_drivers.len()),
-                format!("{} dispositivi", rep.installed_drivers.len()),
+                format!("{}", rep.wu_pending_drivers.len()),
+                format!("{}", rep.installed_drivers.len()),
                 format!("{signed} / {} WHQL", rep.installed_drivers.len()),
             )
         } else {
@@ -2845,26 +3210,29 @@ impl RustCleanerApp {
         ui.columns(3, |cols| {
             draw_kpi_card(
                 &mut cols[0],
-                "DRIVER WINDOWS UPDATE",
+                pal,
+                s.kpi_wu_drivers,
                 &wu_count,
                 "Query: IsInstalled=0 and Type='Driver'",
-                ACCENT_CYAN,
+                pal.accent_cyan,
                 VectorIcon::SoftwareCloudUp,
             );
             draw_kpi_card(
                 &mut cols[1],
-                "DRIVER HARDWARE RILEVATI",
+                pal,
+                s.kpi_pnp_drivers,
                 &pnp_count,
-                "GPU, Rete, Audio, NVMe, USB, Chipset",
-                ACCENT_PURPLE,
+                "GPU, Net, Audio, NVMe, USB, Chipset",
+                pal.accent_purple,
                 VectorIcon::DriverChip,
             );
             draw_kpi_card(
                 &mut cols[2],
-                "CERTIFICAZIONE MICROSOFT",
+                pal,
+                s.kpi_whql_cert,
                 &signed_count,
-                "Zero rischio BSOD da DB esterni",
-                ACCENT_EMERALD,
+                s.kpi_whql_sub,
+                pal.accent_emerald,
                 VectorIcon::CheckShield,
             );
         });
@@ -2872,7 +3240,7 @@ impl RustCleanerApp {
         ui.add_space(8.0);
 
         let list_h = (ui.available_height() - 10.0).max(220.0);
-        card_frame().show(ui, |ui| {
+        card_frame(pal).show(ui, |ui| {
             ui.set_height(list_h);
             if self.driver_busy {
                 ui.vertical_centered(|ui| {
@@ -2880,17 +3248,17 @@ impl RustCleanerApp {
                     ui.spinner();
                     ui.add_space(10.0);
                     ui.label(
-                        RichText::new("Scansione COM WUApiLib / Driver Hardware PnP in corso...")
+                        RichText::new(s.drv_scanning_msg)
                             .size(14.0)
-                            .color(ACCENT_CYAN),
+                            .color(pal.accent_cyan),
                     );
                 });
             } else if let Some(rep) = &self.driver_report {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Filtra driver:").color(TEXT_SECONDARY));
+                    ui.label(RichText::new(s.lbl_filter).color(pal.text_secondary));
                     ui.add(
                         egui::TextEdit::singleline(&mut self.driver_filter)
-                            .hint_text("Cerca per scheda video, rete, produttore...")
+                            .hint_text(s.drv_filter_hint)
                             .desired_width(280.0),
                     );
                 });
@@ -2903,17 +3271,15 @@ impl RustCleanerApp {
                     .show(ui, |ui| {
                         if !rep.wu_pending_drivers.is_empty() {
                             ui.label(
-                                RichText::new(
-                                    "Aggiornamenti Driver Ufficiali Disponibili su Windows Update:",
-                                )
-                                .size(13.5)
-                                .strong()
-                                .color(ACCENT_AMBER),
+                                RichText::new(s.drv_wu_pending_hdr)
+                                    .size(13.5)
+                                    .strong()
+                                    .color(pal.accent_amber),
                             );
                             for wu in &rep.wu_pending_drivers {
                                 egui::Frame::new()
-                                    .fill(Color32::from_rgb(38, 32, 24))
-                                    .stroke(Stroke::new(1.0, ACCENT_AMBER))
+                                    .fill(pal.bg_card_subtle)
+                                    .stroke(Stroke::new(1.2, pal.accent_amber))
                                     .corner_radius(CornerRadius::same(8))
                                     .inner_margin(egui::Margin::symmetric(12, 8))
                                     .show(ui, |ui| {
@@ -2921,33 +3287,43 @@ impl RustCleanerApp {
                                         ui.horizontal_wrapped(|ui| {
                                             draw_pill_badge(
                                                 ui,
-                                                "NUOVO DRIVER WU",
-                                                Color32::from_rgba_unmultiplied(245, 158, 11, 40),
-                                                ACCENT_AMBER,
+                                                s.badge_new_wu_driver,
+                                                Color32::from_rgba_unmultiplied(
+                                                    pal.accent_amber.r(),
+                                                    pal.accent_amber.g(),
+                                                    pal.accent_amber.b(),
+                                                    35,
+                                                ),
+                                                pal.accent_amber,
                                             );
                                             ui.label(
                                                 RichText::new(&wu.title)
                                                     .size(13.5)
                                                     .strong()
-                                                    .color(TEXT_PRIMARY),
+                                                    .color(pal.text_primary),
                                             );
                                             draw_pill_badge(
                                                 ui,
                                                 &format!("{:.2} MB", wu.size_mb),
-                                                Color32::from_rgba_unmultiplied(56, 189, 248, 30),
-                                                ACCENT_CYAN,
+                                                Color32::from_rgba_unmultiplied(
+                                                    pal.accent_cyan.r(),
+                                                    pal.accent_cyan.g(),
+                                                    pal.accent_cyan.b(),
+                                                    28,
+                                                ),
+                                                pal.accent_cyan,
                                             );
                                         });
                                         ui.label(
                                             RichText::new(format!(
-                                                "Produttore: {} • Classe: {} • Data: {}",
+                                                "{} • {} • {}",
                                                 wu.driver_manufacturer,
                                                 wu.driver_class,
                                                 wu.driver_ver_date
                                             ))
                                             .size(11.0)
                                             .monospace()
-                                            .color(TEXT_SECONDARY),
+                                            .color(pal.text_secondary),
                                         );
                                     });
                                 ui.add_space(4.0);
@@ -2956,10 +3332,10 @@ impl RustCleanerApp {
                         }
 
                         ui.label(
-                            RichText::new("Driver Hardware PnP Installati nel Sistema:")
+                            RichText::new(s.drv_pnp_installed_hdr)
                                 .size(13.0)
                                 .strong()
-                                .color(TEXT_SECONDARY),
+                                .color(pal.text_secondary),
                         );
                         ui.add_space(4.0);
 
@@ -2972,8 +3348,8 @@ impl RustCleanerApp {
                                 continue;
                             }
                             egui::Frame::new()
-                                .fill(BG_CARD_SUBTLE)
-                                .stroke(Stroke::new(1.0, BORDER_SUBTLE))
+                                .fill(pal.bg_card_subtle)
+                                .stroke(Stroke::new(1.0, pal.border_subtle))
                                 .corner_radius(CornerRadius::same(8))
                                 .inner_margin(egui::Margin::symmetric(12, 8))
                                 .show(ui, |ui| {
@@ -2982,38 +3358,53 @@ impl RustCleanerApp {
                                         draw_pill_badge(
                                             ui,
                                             &drv.device_class,
-                                            Color32::from_rgba_unmultiplied(56, 189, 248, 25),
-                                            ACCENT_CYAN,
+                                            Color32::from_rgba_unmultiplied(
+                                                pal.accent_cyan.r(),
+                                                pal.accent_cyan.g(),
+                                                pal.accent_cyan.b(),
+                                                25,
+                                            ),
+                                            pal.accent_cyan,
                                         );
                                         ui.label(
                                             RichText::new(&drv.device_name)
                                                 .size(13.0)
                                                 .strong()
-                                                .color(TEXT_PRIMARY),
+                                                .color(pal.text_primary),
                                         );
                                         draw_pill_badge(
                                             ui,
                                             &format!("v{}", drv.driver_version),
-                                            Color32::from_rgba_unmultiplied(168, 85, 247, 30),
-                                            ACCENT_PURPLE,
+                                            Color32::from_rgba_unmultiplied(
+                                                pal.accent_purple.r(),
+                                                pal.accent_purple.g(),
+                                                pal.accent_purple.b(),
+                                                28,
+                                            ),
+                                            pal.accent_purple,
                                         );
                                         if drv.is_signed {
                                             draw_pill_badge(
                                                 ui,
-                                                "Firmato WHQL",
-                                                Color32::from_rgba_unmultiplied(34, 197, 94, 30),
-                                                ACCENT_EMERALD,
+                                                s.badge_whql_signed,
+                                                Color32::from_rgba_unmultiplied(
+                                                    pal.accent_emerald.r(),
+                                                    pal.accent_emerald.g(),
+                                                    pal.accent_emerald.b(),
+                                                    28,
+                                                ),
+                                                pal.accent_emerald,
                                             );
                                         }
                                     });
                                     ui.label(
                                         RichText::new(format!(
-                                            "Produttore: {} • Data Driver: {} • Firmatario: {}",
+                                            "{} • {} • {}",
                                             drv.manufacturer, drv.driver_date, drv.signer
                                         ))
                                         .size(10.5)
                                         .monospace()
-                                        .color(TEXT_MUTED),
+                                        .color(pal.text_muted),
                                     );
                                 });
                             ui.add_space(4.0);
@@ -3024,19 +3415,20 @@ impl RustCleanerApp {
     }
 
     // === 8. AUTOMATION (ZERO-RAM SCHTASKS) & KERNEL MONITOR (NOTIFY) TAB ===
-    fn render_automation_monitor_tab(&mut self, ui: &mut egui::Ui) {
+    fn render_automation_monitor_tab(&mut self, ui: &mut egui::Ui, pal: &ThemePalette) {
+        let s = self.language.strings();
+        let current_lang = self.language;
+
         ui.label(
-            RichText::new("Pulizia Programmata (0 RAM) & Monitoraggio Kernel (Zero Polling)")
+            RichText::new(s.auto_title)
                 .size(19.0)
                 .strong()
-                .color(TEXT_PRIMARY),
+                .color(pal.text_primary),
         );
         ui.label(
-            RichText::new(
-                "Usa l'Utilità di Pianificazione di Windows (schtasks.exe --silent-clean) e le API kernel ReadDirectoryChangesW (crate notify).",
-            )
-            .size(12.0)
-            .color(TEXT_SECONDARY),
+            RichText::new(s.auto_subtitle)
+                .size(12.0)
+                .color(pal.text_secondary),
         );
         ui.add_space(8.0);
 
@@ -3044,75 +3436,94 @@ impl RustCleanerApp {
 
         ui.columns(2, |cols| {
             // LEFT CARD: Windows Task Scheduler (`schtasks.exe`)
-            card_frame().show(&mut cols[0], |ui| {
+            card_frame(pal).show(&mut cols[0], |ui| {
                 ui.set_height(col_h);
                 ui.horizontal(|ui| {
                     ui.label(
-                        RichText::new("1. Pulizia Programmata (schtasks.exe)")
+                        RichText::new(s.sched_card_hdr)
                             .size(14.5)
                             .strong()
-                            .color(TEXT_PRIMARY),
+                            .color(pal.text_primary),
                     );
                     draw_pill_badge(
                         ui,
-                        "0 MB RAM A RIPOSO",
-                        Color32::from_rgba_unmultiplied(34, 197, 94, 35),
-                        ACCENT_EMERALD,
+                        s.badge_zero_ram_idle,
+                        Color32::from_rgba_unmultiplied(
+                            pal.accent_emerald.r(),
+                            pal.accent_emerald.g(),
+                            pal.accent_emerald.b(),
+                            32,
+                        ),
+                        pal.accent_emerald,
                     );
                 });
                 ui.separator();
 
                 egui::Frame::new()
-                    .fill(BG_CARD_SUBTLE)
-                    .stroke(Stroke::new(1.0, BORDER_SUBTLE))
+                    .fill(pal.bg_card_subtle)
+                    .stroke(Stroke::new(1.0, pal.border_subtle))
                     .corner_radius(CornerRadius::same(8))
                     .inner_margin(egui::Margin::symmetric(12, 8))
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width());
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new("Stato Task:").color(TEXT_SECONDARY));
+                            ui.label(RichText::new(s.lbl_task_status).color(pal.text_secondary));
                             if self.schedule_status.exists {
                                 draw_pill_badge(
                                     ui,
-                                    "PIANIFICAZIONE ATTIVA",
-                                    Color32::from_rgba_unmultiplied(34, 197, 94, 35),
-                                    ACCENT_EMERALD,
+                                    s.badge_sched_active,
+                                    Color32::from_rgba_unmultiplied(
+                                        pal.accent_emerald.r(),
+                                        pal.accent_emerald.g(),
+                                        pal.accent_emerald.b(),
+                                        32,
+                                    ),
+                                    pal.accent_emerald,
                                 );
                             } else {
                                 draw_pill_badge(
                                     ui,
-                                    "NON CONFIGURATA",
-                                    Color32::from_rgba_unmultiplied(245, 158, 11, 30),
-                                    ACCENT_AMBER,
+                                    s.badge_sched_inactive,
+                                    Color32::from_rgba_unmultiplied(
+                                        pal.accent_amber.r(),
+                                        pal.accent_amber.g(),
+                                        pal.accent_amber.b(),
+                                        28,
+                                    ),
+                                    pal.accent_amber,
                                 );
                             }
                         });
                         if self.schedule_status.exists {
                             ui.label(
                                 RichText::new(format!(
-                                    "Prossima esecuzione: {}",
-                                    self.schedule_status.next_run_time
+                                    "{} {}",
+                                    s.lbl_next_run, self.schedule_status.next_run_time
                                 ))
                                 .size(11.5)
                                 .monospace()
-                                .color(ACCENT_CYAN),
+                                .color(pal.accent_cyan),
                             );
                         }
                     });
 
                 ui.add_space(6.0);
                 ui.label(
-                    RichText::new("Frequenza di Esecuzione:")
+                    RichText::new(s.lbl_exec_freq)
                         .size(12.5)
                         .strong()
-                        .color(TEXT_SECONDARY),
+                        .color(pal.text_secondary),
                 );
                 for freq in [
                     ScheduleFrequency::Daily,
                     ScheduleFrequency::Weekly,
                     ScheduleFrequency::OnLogon,
                 ] {
-                    let rb = ui.radio_value(&mut self.schedule_freq, freq, freq.label());
+                    let rb = ui.radio_value(
+                        &mut self.schedule_freq,
+                        freq,
+                        current_lang.localize_schedule_freq(freq),
+                    );
                     if rb.hovered() {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                     }
@@ -3120,7 +3531,7 @@ impl RustCleanerApp {
 
                 if self.schedule_freq != ScheduleFrequency::OnLogon {
                     ui.horizontal(|ui| {
-                        ui.label("Orario (HH:MM):");
+                        ui.label(s.lbl_time_hhmm);
                         ui.add(
                             egui::TextEdit::singleline(&mut self.schedule_time_hhmm)
                                 .desired_width(70.0),
@@ -3128,16 +3539,14 @@ impl RustCleanerApp {
                     });
                 }
 
-                ui.checkbox(
-                    &mut self.schedule_highest_uac,
-                    "Esegui con privilegi elevati (/RL HIGHEST — richiede UAC)",
-                );
+                ui.checkbox(&mut self.schedule_highest_uac, s.sched_uac_checkbox);
 
                 ui.add_space(6.0);
                 ui.horizontal_wrapped(|ui| {
                     if draw_action_button(
                         ui,
-                        "Salva in Task Scheduler",
+                        pal,
+                        s.btn_save_task,
                         VectorIcon::CheckShield,
                         ButtonVariant::ExecuteBrand,
                         true,
@@ -3157,7 +3566,8 @@ impl RustCleanerApp {
 
                     if draw_action_button(
                         ui,
-                        "Test --silent-clean",
+                        pal,
+                        s.btn_test_silent,
                         VectorIcon::PlayRun,
                         ButtonVariant::Secondary,
                         true,
@@ -3174,7 +3584,8 @@ impl RustCleanerApp {
                     if self.schedule_status.exists
                         && draw_action_button(
                             ui,
-                            "Rimuovi Task",
+                            pal,
+                            s.btn_remove_task,
                             VectorIcon::TrashDelete,
                             ButtonVariant::Danger,
                             true,
@@ -3192,10 +3603,10 @@ impl RustCleanerApp {
 
                 ui.add_space(6.0);
                 ui.label(
-                    RichText::new("Ultime esecuzioni silenziose (rustcleaner_scheduled.log):")
+                    RichText::new(s.sched_logs_hdr)
                         .size(11.5)
                         .strong()
-                        .color(TEXT_SECONDARY),
+                        .color(pal.text_secondary),
                 );
                 egui::ScrollArea::vertical()
                     .id_salt("sched_log_scroll")
@@ -3203,11 +3614,9 @@ impl RustCleanerApp {
                     .show(ui, |ui| {
                         if self.schedule_logs.is_empty() {
                             ui.label(
-                                RichText::new(
-                                    "Nessun log registrato. Clicca su 'Test --silent-clean' per provare.",
-                                )
-                                .size(11.0)
-                                .color(TEXT_MUTED),
+                                RichText::new(s.sched_logs_empty)
+                                    .size(11.0)
+                                    .color(pal.text_muted),
                             );
                         } else {
                             for line in &self.schedule_logs {
@@ -3215,7 +3624,7 @@ impl RustCleanerApp {
                                     RichText::new(line)
                                         .size(10.5)
                                         .monospace()
-                                        .color(ACCENT_EMERALD),
+                                        .color(pal.accent_emerald),
                                 );
                             }
                         }
@@ -3223,22 +3632,27 @@ impl RustCleanerApp {
             });
 
             // RIGHT CARD: Real-Time Kernel Event Watcher (`notify` / `ReadDirectoryChangesW`)
-            card_frame().show(&mut cols[1], |ui| {
+            card_frame(pal).show(&mut cols[1], |ui| {
                 ui.set_height(col_h);
                 let mon_snap = self.monitor_state.lock().unwrap().clone();
 
                 ui.horizontal(|ui| {
                     ui.label(
-                        RichText::new("2. Monitoraggio Kernel (ReadDirectoryChangesW)")
+                        RichText::new(s.mon_card_hdr)
                             .size(14.5)
                             .strong()
-                            .color(TEXT_PRIMARY),
+                            .color(pal.text_primary),
                     );
                     draw_pill_badge(
                         ui,
-                        "0% CPU POLLING",
-                        Color32::from_rgba_unmultiplied(56, 189, 248, 35),
-                        ACCENT_CYAN,
+                        s.badge_zero_cpu,
+                        Color32::from_rgba_unmultiplied(
+                            pal.accent_cyan.r(),
+                            pal.accent_cyan.g(),
+                            pal.accent_cyan.b(),
+                            32,
+                        ),
+                        pal.accent_cyan,
                     );
                 });
                 ui.separator();
@@ -3247,7 +3661,8 @@ impl RustCleanerApp {
                     if !mon_snap.active {
                         if draw_action_button(
                             ui,
-                            "Avvia Monitor Kernel",
+                            pal,
+                            s.btn_start_monitor,
                             VectorIcon::AutomationPulse,
                             ButtonVariant::PrimaryScan,
                             true,
@@ -3257,41 +3672,44 @@ impl RustCleanerApp {
                                 Arc::clone(&self.monitor_state),
                                 Arc::clone(&self.monitor_stop_flag),
                             );
-                            self.status_banner = "Monitoraggio Kernel ReadDirectoryChangesW avviato (0% CPU in attesa di eventi dal file system).".to_string();
+                            self.status_banner =
+                                "ReadDirectoryChangesW active (0% CPU polling).".to_string();
                         }
                     } else if draw_action_button(
                         ui,
-                        "Ferma Monitor Kernel",
+                        pal,
+                        s.btn_stop_monitor,
                         VectorIcon::StopOctagon,
                         ButtonVariant::Danger,
                         true,
                     ) {
                         self.monitor_stop_flag.store(true, Ordering::Relaxed);
-                        self.status_banner =
-                            "Monitoraggio Kernel ReadDirectoryChangesW fermato.".to_string();
+                        self.status_banner = "ReadDirectoryChangesW stopped.".to_string();
                     }
 
                     draw_pill_badge(
                         ui,
-                        &format!("Eventi Kernel: {}", mon_snap.total_events_received),
-                        Color32::from_rgba_unmultiplied(168, 85, 247, 30),
-                        ACCENT_PURPLE,
+                        &format!("{}: {}", s.badge_kernel_events, mon_snap.total_events_received),
+                        Color32::from_rgba_unmultiplied(
+                            pal.accent_purple.r(),
+                            pal.accent_purple.g(),
+                            pal.accent_purple.b(),
+                            28,
+                        ),
+                        pal.accent_purple,
                     );
                 });
 
                 ui.add_space(4.0);
                 if let Ok(mut st) = self.monitor_state.lock() {
-                    ui.checkbox(
-                        &mut st.auto_clean_on_browser_close,
-                        "Pulisci automaticamente la cache alla chiusura di Chrome / Edge / Brave",
-                    );
+                    ui.checkbox(&mut st.auto_clean_on_browser_close, s.mon_auto_browser_cb);
                 }
 
                 ui.label(
-                    RichText::new("Percorsi monitorati a livello Kernel:")
+                    RichText::new(s.mon_watched_paths_hdr)
                         .size(11.5)
                         .strong()
-                        .color(TEXT_SECONDARY),
+                        .color(pal.text_secondary),
                 );
                 for (lbl, p) in &mon_snap.watched_paths {
                     let wp = format!("  • {lbl}: {}", p.display());
@@ -3300,7 +3718,7 @@ impl RustCleanerApp {
                             RichText::new(&wp)
                                 .size(10.5)
                                 .monospace()
-                                .color(TEXT_MUTED),
+                                .color(pal.text_muted),
                         )
                         .truncate(),
                     )
@@ -3311,16 +3729,16 @@ impl RustCleanerApp {
                     ui.label(
                         RichText::new(last_auto)
                             .size(11.0)
-                            .color(ACCENT_EMERALD),
+                            .color(pal.accent_emerald),
                     );
                 }
 
                 ui.separator();
                 ui.label(
-                    RichText::new("Feed Eventi Kernel in Tempo Reale (ReadDirectoryChangesW):")
+                    RichText::new(s.mon_live_feed_hdr)
                         .size(12.0)
                         .strong()
-                        .color(TEXT_PRIMARY),
+                        .color(pal.text_primary),
                 );
 
                 egui::ScrollArea::vertical()
@@ -3330,10 +3748,11 @@ impl RustCleanerApp {
                         if mon_snap.events.is_empty() {
                             draw_empty_state(
                                 ui,
+                                pal,
                                 VectorIcon::AutomationPulse,
-                                ACCENT_PURPLE,
-                                "In Attesa di Eventi I/O dal Kernel",
-                                "Avvia il monitor per osservare in diretta le modifiche a %TEMP% e alle sessioni dei browser.",
+                                pal.accent_purple,
+                                s.mon_empty_title,
+                                s.mon_empty_desc,
                             );
                         } else {
                             for ev in &mon_snap.events {
@@ -3342,26 +3761,31 @@ impl RustCleanerApp {
                                         RichText::new(&ev.timestamp)
                                             .size(10.5)
                                             .monospace()
-                                            .color(TEXT_MUTED),
+                                            .color(pal.text_muted),
                                     );
                                     draw_pill_badge(
                                         ui,
                                         &ev.event_type,
-                                        Color32::from_rgba_unmultiplied(56, 189, 248, 25),
-                                        ACCENT_CYAN,
+                                        Color32::from_rgba_unmultiplied(
+                                            pal.accent_cyan.r(),
+                                            pal.accent_cyan.g(),
+                                            pal.accent_cyan.b(),
+                                            25,
+                                        ),
+                                        pal.accent_cyan,
                                     );
                                     ui.label(
                                         RichText::new(&ev.source_label)
                                             .size(11.0)
                                             .strong()
-                                            .color(TEXT_PRIMARY),
+                                            .color(pal.text_primary),
                                     );
                                     ui.add(
                                         egui::Label::new(
                                             RichText::new(&ev.path)
                                                 .size(10.5)
                                                 .monospace()
-                                                .color(TEXT_SECONDARY),
+                                                .color(pal.text_secondary),
                                         )
                                         .truncate(),
                                     )

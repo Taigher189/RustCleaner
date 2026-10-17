@@ -6,6 +6,7 @@
 pub mod cleaner;
 pub mod driver_updater;
 pub mod gui;
+pub mod i18n;
 pub mod monitor;
 pub mod registry;
 pub mod scheduler;
@@ -22,7 +23,7 @@ use std::sync::{Arc, Mutex};
 #[derive(Parser)]
 #[command(
     name = "rustcleaner",
-    version = "0.1.0-alpha",
+    version = "1.0.0-alpha",
     about = "[MEGA ALPHA] Utility di pulizia, aggiornamento e ottimizzazione per Windows scritta in Rust (Zero Telemetria, 0 MB RAM in background)"
 )]
 struct Cli {
