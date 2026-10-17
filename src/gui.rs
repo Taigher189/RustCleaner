@@ -676,10 +676,11 @@ fn draw_action_button(
             });
         });
 
+    let btn_id = ui.next_auto_id().with(label);
     if enabled {
         let interact = ui.interact(
             resp.response.rect,
-            ui.id().with(label),
+            btn_id,
             Sense::click(),
         );
         if interact.hovered() {
@@ -1045,7 +1046,7 @@ impl eframe::App for RustCleanerApp {
                             );
                             draw_pill_badge(
                                 ui,
-                                "MEGA ALPHA v1.0.0-alpha",
+                                "MEGA ALPHA v1.2.0-alpha",
                                 Color32::from_rgba_unmultiplied(
                                     pal.accent_rust.r(),
                                     pal.accent_rust.g(),
@@ -2270,108 +2271,111 @@ impl RustCleanerApp {
                 .id_salt("startup_scroll")
                 .max_height((ui.available_height() - 6.0).max(180.0))
                 .show(ui, |ui| {
-                    for entry in &self.startup_entries {
+                    for (row_idx, entry) in self.startup_entries.iter().enumerate() {
                         if !filter_low.is_empty()
                             && !entry.name.to_lowercase().contains(&filter_low)
                             && !entry.command.to_lowercase().contains(&filter_low)
                         {
                             continue;
                         }
-                        egui::Frame::new()
-                            .fill(pal.bg_card_subtle)
-                            .stroke(Stroke::new(1.0, pal.border_subtle))
-                            .corner_radius(CornerRadius::same(8))
-                            .inner_margin(egui::Margin::symmetric(12, 9))
-                            .show(ui, |ui| {
-                                ui.set_width(ui.available_width());
-                                ui.horizontal(|ui| {
-                                    if entry.enabled {
+                        ui.push_id(row_idx, |ui| {
+                            egui::Frame::new()
+                                .fill(pal.bg_card_subtle)
+                                .stroke(Stroke::new(1.0, pal.border_subtle))
+                                .corner_radius(CornerRadius::same(8))
+                                .inner_margin(egui::Margin::symmetric(12, 9))
+                                .show(ui, |ui| {
+                                    ui.set_width(ui.available_width());
+                                    ui.horizontal(|ui| {
+                                        if entry.enabled {
+                                            draw_pill_badge(
+                                                ui,
+                                                s.pill_enabled,
+                                                Color32::from_rgba_unmultiplied(
+                                                    pal.accent_emerald.r(),
+                                                    pal.accent_emerald.g(),
+                                                    pal.accent_emerald.b(),
+                                                    32,
+                                                ),
+                                                pal.accent_emerald,
+                                            );
+                                        } else {
+                                            draw_pill_badge(
+                                                ui,
+                                                s.pill_disabled,
+                                                Color32::from_rgba_unmultiplied(
+                                                    pal.accent_amber.r(),
+                                                    pal.accent_amber.g(),
+                                                    pal.accent_amber.b(),
+                                                    32,
+                                                ),
+                                                pal.accent_amber,
+                                            );
+                                        }
                                         draw_pill_badge(
                                             ui,
-                                            s.pill_enabled,
+                                            entry.source.key_label(),
                                             Color32::from_rgba_unmultiplied(
-                                                pal.accent_emerald.r(),
-                                                pal.accent_emerald.g(),
-                                                pal.accent_emerald.b(),
-                                                32,
+                                                pal.accent_cyan.r(),
+                                                pal.accent_cyan.g(),
+                                                pal.accent_cyan.b(),
+                                                25,
                                             ),
-                                            pal.accent_emerald,
+                                            pal.accent_cyan,
                                         );
-                                    } else {
-                                        draw_pill_badge(
-                                            ui,
-                                            s.pill_disabled,
-                                            Color32::from_rgba_unmultiplied(
-                                                pal.accent_amber.r(),
-                                                pal.accent_amber.g(),
-                                                pal.accent_amber.b(),
-                                                32,
-                                            ),
-                                            pal.accent_amber,
+                                        ui.label(
+                                            RichText::new(&entry.name)
+                                                .size(14.0)
+                                                .strong()
+                                                .color(pal.text_primary),
                                         );
-                                    }
-                                    draw_pill_badge(
-                                        ui,
-                                        entry.source.key_label(),
-                                        Color32::from_rgba_unmultiplied(
-                                            pal.accent_cyan.r(),
-                                            pal.accent_cyan.g(),
-                                            pal.accent_cyan.b(),
-                                            25,
-                                        ),
-                                        pal.accent_cyan,
-                                    );
-                                    ui.label(
-                                        RichText::new(&entry.name)
-                                            .size(14.0)
-                                            .strong()
-                                            .color(pal.text_primary),
-                                    );
 
-                                    ui.with_layout(
-                                        egui::Layout::right_to_left(egui::Align::Center),
-                                        |ui| {
-                                            if draw_action_button(
-                                                ui,
-                                                pal,
-                                                s.btn_delete,
-                                                VectorIcon::TrashDelete,
-                                                ButtonVariant::Danger,
-                                                true,
-                                            ) {
-                                                delete_req = Some(entry.clone());
-                                            }
-                                            let (toggle_label, variant) = if entry.enabled {
-                                                (s.btn_disable, ButtonVariant::Secondary)
-                                            } else {
-                                                (s.btn_enable, ButtonVariant::PrimaryScan)
-                                            };
-                                            if draw_action_button(
-                                                ui,
-                                                pal,
-                                                toggle_label,
-                                                VectorIcon::StartupBolt,
-                                                variant,
-                                                true,
-                                            ) {
-                                                toggle_req = Some((entry.clone(), !entry.enabled));
-                                            }
-                                        },
-                                    );
-                                });
-                                ui.add_space(2.0);
-                                let cmd_str = format!("{} {}", s.lbl_command, entry.command);
-                                ui.add(
-                                    egui::Label::new(
-                                        RichText::new(&cmd_str)
-                                            .size(11.0)
-                                            .monospace()
-                                            .color(pal.text_muted),
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                if draw_action_button(
+                                                    ui,
+                                                    pal,
+                                                    s.btn_delete,
+                                                    VectorIcon::TrashDelete,
+                                                    ButtonVariant::Danger,
+                                                    true,
+                                                ) {
+                                                    delete_req = Some(entry.clone());
+                                                }
+                                                let (toggle_label, variant) = if entry.enabled {
+                                                    (s.btn_disable, ButtonVariant::Secondary)
+                                                } else {
+                                                    (s.btn_enable, ButtonVariant::PrimaryScan)
+                                                };
+                                                if draw_action_button(
+                                                    ui,
+                                                    pal,
+                                                    toggle_label,
+                                                    VectorIcon::StartupBolt,
+                                                    variant,
+                                                    true,
+                                                ) {
+                                                    toggle_req =
+                                                        Some((entry.clone(), !entry.enabled));
+                                                }
+                                            },
+                                        );
+                                    });
+                                    ui.add_space(2.0);
+                                    let cmd_str = format!("{} {}", s.lbl_command, entry.command);
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(&cmd_str)
+                                                .size(11.0)
+                                                .monospace()
+                                                .color(pal.text_muted),
+                                        )
+                                        .truncate(),
                                     )
-                                    .truncate(),
-                                )
-                                .on_hover_text(&entry.command);
-                            });
+                                    .on_hover_text(&entry.command);
+                                });
+                        });
                         ui.add_space(4.0);
                     }
                 });
@@ -2474,94 +2478,108 @@ impl RustCleanerApp {
                 .id_salt("uninstaller_scroll")
                 .max_height((ui.available_height() - 6.0).max(180.0))
                 .show(ui, |ui| {
-                    for app in &self.installed_apps {
+                    for (row_idx, app) in self.installed_apps.iter().enumerate() {
                         if !filter_low.is_empty()
                             && !app.display_name.to_lowercase().contains(&filter_low)
                             && !app.publisher.to_lowercase().contains(&filter_low)
                         {
                             continue;
                         }
-                        egui::Frame::new()
-                            .fill(pal.bg_card_subtle)
-                            .stroke(Stroke::new(1.0, pal.border_subtle))
-                            .corner_radius(CornerRadius::same(8))
-                            .inner_margin(egui::Margin::symmetric(12, 9))
-                            .show(ui, |ui| {
-                                ui.set_width(ui.available_width());
-                                ui.horizontal(|ui| {
-                                    ui.vertical(|ui| {
-                                        ui.horizontal_wrapped(|ui| {
-                                            ui.label(
-                                                RichText::new(&app.display_name)
-                                                    .size(14.0)
-                                                    .strong()
-                                                    .color(pal.text_primary),
-                                            );
-                                            if !app.display_version.is_empty() {
-                                                draw_pill_badge(
-                                                    ui,
-                                                    &format!("v{}", app.display_version),
-                                                    Color32::from_rgba_unmultiplied(
-                                                        pal.accent_cyan.r(),
-                                                        pal.accent_cyan.g(),
-                                                        pal.accent_cyan.b(),
-                                                        28,
-                                                    ),
-                                                    pal.accent_cyan,
+                        ui.push_id(row_idx, |ui| {
+                            egui::Frame::new()
+                                .fill(pal.bg_card_subtle)
+                                .stroke(Stroke::new(1.0, pal.border_subtle))
+                                .corner_radius(CornerRadius::same(8))
+                                .inner_margin(egui::Margin::symmetric(12, 9))
+                                .show(ui, |ui| {
+                                    let row_w = ui.available_width();
+                                    ui.set_width(row_w);
+                                    ui.horizontal(|ui| {
+                                        let left_w = (row_w - 155.0).max(180.0);
+                                        ui.allocate_ui_with_layout(
+                                            egui::vec2(left_w, 38.0),
+                                            egui::Layout::top_down(egui::Align::Min),
+                                            |ui| {
+                                                ui.set_max_width(left_w);
+                                                ui.horizontal_wrapped(|ui| {
+                                                    ui.label(
+                                                        RichText::new(&app.display_name)
+                                                            .size(14.0)
+                                                            .strong()
+                                                            .color(pal.text_primary),
+                                                    );
+                                                    if !app.display_version.is_empty() {
+                                                        draw_pill_badge(
+                                                            ui,
+                                                            &format!("v{}", app.display_version),
+                                                            Color32::from_rgba_unmultiplied(
+                                                                pal.accent_cyan.r(),
+                                                                pal.accent_cyan.g(),
+                                                                pal.accent_cyan.b(),
+                                                                28,
+                                                            ),
+                                                            pal.accent_cyan,
+                                                        );
+                                                    }
+                                                    if let Some(kb) = app.estimated_size_kb {
+                                                        draw_pill_badge(
+                                                            ui,
+                                                            &format!("{:.1} MB", kb as f64 / 1024.0),
+                                                            Color32::from_rgba_unmultiplied(
+                                                                pal.accent_emerald.r(),
+                                                                pal.accent_emerald.g(),
+                                                                pal.accent_emerald.b(),
+                                                                28,
+                                                            ),
+                                                            pal.accent_emerald,
+                                                        );
+                                                    }
+                                                    if !app.publisher.is_empty() {
+                                                        ui.label(
+                                                            RichText::new(format!(
+                                                                "• {}",
+                                                                app.publisher
+                                                            ))
+                                                            .size(11.5)
+                                                            .color(pal.text_secondary),
+                                                        );
+                                                    }
+                                                });
+                                                let u_cmd = format!(
+                                                    "{} {}",
+                                                    s.lbl_command, app.uninstall_string
                                                 );
-                                            }
-                                            if let Some(kb) = app.estimated_size_kb {
-                                                draw_pill_badge(
-                                                    ui,
-                                                    &format!("{:.1} MB", kb as f64 / 1024.0),
-                                                    Color32::from_rgba_unmultiplied(
-                                                        pal.accent_emerald.r(),
-                                                        pal.accent_emerald.g(),
-                                                        pal.accent_emerald.b(),
-                                                        28,
-                                                    ),
-                                                    pal.accent_emerald,
-                                                );
-                                            }
-                                            if !app.publisher.is_empty() {
-                                                ui.label(
-                                                    RichText::new(format!("• {}", app.publisher))
-                                                        .size(11.5)
-                                                        .color(pal.text_secondary),
-                                                );
-                                            }
-                                        });
-                                        let u_cmd =
-                                            format!("{} {}", s.lbl_command, app.uninstall_string);
-                                        ui.add(
-                                            egui::Label::new(
-                                                RichText::new(&u_cmd)
-                                                    .size(10.5)
-                                                    .monospace()
-                                                    .color(pal.text_muted),
-                                            )
-                                            .truncate(),
-                                        )
-                                        .on_hover_text(&app.uninstall_string);
-                                    });
+                                                ui.add(
+                                                    egui::Label::new(
+                                                        RichText::new(&u_cmd)
+                                                            .size(10.5)
+                                                            .monospace()
+                                                            .color(pal.text_muted),
+                                                    )
+                                                    .truncate(),
+                                                )
+                                                .on_hover_text(&app.uninstall_string);
+                                            },
+                                        );
 
-                                    ui.with_layout(
-                                        egui::Layout::right_to_left(egui::Align::Center),
-                                        |ui| {
-                                            if draw_action_button(
-                                                ui,
-                                                pal,
-                                                s.btn_uninstall,
-                                                VectorIcon::UninstallerBox,
-                                                ButtonVariant::Danger,
-                                                true,
-                                            ) {
-                                                launch_req = Some(app.clone());
-                                            }
-                                        },
-                                    );
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                if draw_action_button(
+                                                    ui,
+                                                    pal,
+                                                    s.btn_uninstall,
+                                                    VectorIcon::UninstallerBox,
+                                                    ButtonVariant::Danger,
+                                                    true,
+                                                ) {
+                                                    launch_req = Some(app.clone());
+                                                }
+                                            },
+                                        );
+                                    });
                                 });
-                            });
+                        });
                         ui.add_space(4.0);
                     }
                 });
@@ -3015,93 +3033,105 @@ impl RustCleanerApp {
                                 &rep.raw_message,
                             );
                         } else {
-                            for pkg in &rep.updates {
+                            for (row_idx, pkg) in rep.updates.iter().enumerate() {
                                 if !filter_low.is_empty()
                                     && !pkg.name.to_lowercase().contains(&filter_low)
                                     && !pkg.id.to_lowercase().contains(&filter_low)
                                 {
                                     continue;
                                 }
-                                egui::Frame::new()
-                                    .fill(pal.bg_card_subtle)
-                                    .stroke(Stroke::new(1.0, pal.border_subtle))
-                                    .corner_radius(CornerRadius::same(8))
-                                    .inner_margin(egui::Margin::symmetric(12, 9))
-                                    .show(ui, |ui| {
-                                        ui.set_width(ui.available_width());
-                                        ui.horizontal(|ui| {
-                                            ui.vertical(|ui| {
-                                                ui.horizontal_wrapped(|ui| {
-                                                    ui.label(
-                                                        RichText::new(&pkg.name)
-                                                            .size(14.0)
-                                                            .strong()
-                                                            .color(pal.text_primary),
-                                                    );
-                                                    draw_pill_badge(
-                                                        ui,
-                                                        &format!(
-                                                            "{}: {}",
-                                                            s.badge_current_ver,
-                                                            pkg.current_version
-                                                        ),
-                                                        Color32::from_rgba_unmultiplied(
-                                                            pal.accent_amber.r(),
-                                                            pal.accent_amber.g(),
-                                                            pal.accent_amber.b(),
-                                                            28,
-                                                        ),
-                                                        pal.accent_amber,
-                                                    );
-                                                    ui.label(
-                                                        RichText::new("->")
+                                ui.push_id(row_idx, |ui| {
+                                    egui::Frame::new()
+                                        .fill(pal.bg_card_subtle)
+                                        .stroke(Stroke::new(1.0, pal.border_subtle))
+                                        .corner_radius(CornerRadius::same(8))
+                                        .inner_margin(egui::Margin::symmetric(12, 9))
+                                        .show(ui, |ui| {
+                                            let row_w = ui.available_width();
+                                            ui.set_width(row_w);
+                                            ui.horizontal(|ui| {
+                                                let left_w = (row_w - 155.0).max(180.0);
+                                                ui.allocate_ui_with_layout(
+                                                    egui::vec2(left_w, 38.0),
+                                                    egui::Layout::top_down(egui::Align::Min),
+                                                    |ui| {
+                                                        ui.set_max_width(left_w);
+                                                        ui.horizontal_wrapped(|ui| {
+                                                            ui.label(
+                                                                RichText::new(&pkg.name)
+                                                                    .size(14.0)
+                                                                    .strong()
+                                                                    .color(pal.text_primary),
+                                                            );
+                                                            draw_pill_badge(
+                                                                ui,
+                                                                &format!(
+                                                                    "{}: {}",
+                                                                    s.badge_current_ver,
+                                                                    pkg.current_version
+                                                                ),
+                                                                Color32::from_rgba_unmultiplied(
+                                                                    pal.accent_amber.r(),
+                                                                    pal.accent_amber.g(),
+                                                                    pal.accent_amber.b(),
+                                                                    28,
+                                                                ),
+                                                                pal.accent_amber,
+                                                            );
+                                                            ui.label(
+                                                                RichText::new("->")
+                                                                    .monospace()
+                                                                    .color(pal.text_muted),
+                                                            );
+                                                            draw_pill_badge(
+                                                                ui,
+                                                                &format!(
+                                                                    "{}: {}",
+                                                                    s.badge_new_ver,
+                                                                    pkg.available_version
+                                                                ),
+                                                                Color32::from_rgba_unmultiplied(
+                                                                    pal.accent_emerald.r(),
+                                                                    pal.accent_emerald.g(),
+                                                                    pal.accent_emerald.b(),
+                                                                    32,
+                                                                ),
+                                                                pal.accent_emerald,
+                                                            );
+                                                        });
+                                                        ui.label(
+                                                            RichText::new(format!(
+                                                                "ID: {} • Source: {}",
+                                                                pkg.id, pkg.source
+                                                            ))
+                                                            .size(10.5)
                                                             .monospace()
                                                             .color(pal.text_muted),
-                                                    );
-                                                    draw_pill_badge(
-                                                        ui,
-                                                        &format!(
-                                                            "{}: {}",
-                                                            s.badge_new_ver,
-                                                            pkg.available_version
-                                                        ),
-                                                        Color32::from_rgba_unmultiplied(
-                                                            pal.accent_emerald.r(),
-                                                            pal.accent_emerald.g(),
-                                                            pal.accent_emerald.b(),
-                                                            32,
-                                                        ),
-                                                        pal.accent_emerald,
-                                                    );
-                                                });
-                                                ui.label(
-                                                    RichText::new(format!(
-                                                        "ID: {} • Source: {}",
-                                                        pkg.id, pkg.source
-                                                    ))
-                                                    .size(10.5)
-                                                    .monospace()
-                                                    .color(pal.text_muted),
+                                                        );
+                                                    },
+                                                );
+
+                                                ui.with_layout(
+                                                    egui::Layout::right_to_left(
+                                                        egui::Align::Center,
+                                                    ),
+                                                    |ui| {
+                                                        if draw_action_button(
+                                                            ui,
+                                                            pal,
+                                                            s.btn_upgrade_single,
+                                                            VectorIcon::SoftwareCloudUp,
+                                                            ButtonVariant::ExecuteBrand,
+                                                            true,
+                                                        ) {
+                                                            single_upgrade_id =
+                                                                Some(pkg.id.clone());
+                                                        }
+                                                    },
                                                 );
                                             });
-
-                                            ui.with_layout(
-                                                egui::Layout::right_to_left(egui::Align::Center),
-                                                |ui| {
-                                                    if draw_action_button(
-                                                        ui,
-                                                        pal,
-                                                        s.btn_upgrade_single,
-                                                        VectorIcon::SoftwareCloudUp,
-                                                        ButtonVariant::ExecuteBrand,
-                                                        true,
-                                                    ) {
-                                                        single_upgrade_id = Some(pkg.id.clone());
-                                                    }
-                                                },
-                                            );
                                         });
-                                    });
+                                });
                                 ui.add_space(4.0);
                             }
                         }

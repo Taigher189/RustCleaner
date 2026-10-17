@@ -381,58 +381,143 @@ pub fn list_installed_apps() -> Vec<InstalledApp> {
     apps
 }
 
-/// Parses and launches an application's `UninstallString` via `std::process::Command`,
-/// replicating CCleaner's uninstaller dispatcher (`"Uninstall - Executing shell command, file: '{}', params: '{}'"` @ `0x1a17410`).
+/// Parses and launches an application's `UninstallString` via Windows `ShellExecuteW`
+/// (with `Command` fallback), replicating CCleaner's uninstaller dispatcher
+/// (`"Uninstall - Executing shell command, file: '{}', params: '{}'"` @ `0x1a17410`).
+/// Using `ShellExecuteW` ensures Windows automatically shows the UAC elevation prompt
+/// when an uninstaller (`unins000.exe`, `setup.exe`, etc.) requires administrator privileges.
 pub fn launch_uninstaller(app: &InstalledApp) -> Result<String, String> {
-    let raw = app.uninstall_string.trim();
-    if raw.is_empty() {
+    let raw_unexpanded = app.uninstall_string.trim();
+    if raw_unexpanded.is_empty() {
         return Err("UninstallString vuoto.".to_string());
     }
 
-    // If WindowsInstaller (`msiexec.exe /I{GUID}` or `/X{GUID}` @ `0x1a178e0`)
-    if app.windows_installer || raw.to_lowercase().starts_with("msiexec") {
-        let args_str = raw
+    let expanded_buf = crate::cleaner::expand_env_vars(raw_unexpanded);
+    let raw = expanded_buf.to_string_lossy().to_string();
+    let raw = raw.trim();
+
+    // Case 1: MSI package (`msiexec.exe /I{GUID}` or `/X{GUID}` @ `0x1a178e0`)
+    if raw.to_lowercase().starts_with("msiexec") {
+        let mut args_str = raw
             .split_once(' ')
-            .map(|(_, rest)| rest.trim())
-            .unwrap_or("");
-        Command::new("msiexec.exe")
-            .raw_arg_or_split(args_str)
-            .spawn()
-            .map_err(|e| format!("Errore avvio msiexec.exe: {e}"))?;
-        return Ok(format!("Avviato msiexec.exe {args_str}"));
+            .map(|(_, rest)| rest.trim().to_string())
+            .unwrap_or_default();
+
+        // Convert `/I{GUID}` maintenance flag to `/X{GUID}` uninstall flag when appropriate
+        if args_str.contains("/I{") {
+            args_str = args_str.replace("/I{", "/X{");
+        } else if args_str.contains("/i{") {
+            args_str = args_str.replace("/i{", "/X{");
+        }
+
+        shell_execute_command("msiexec.exe", &args_str)?;
+        return Ok(format!(
+            "Avviato Windows Installer per '{}': msiexec.exe {args_str}",
+            app.display_name
+        ));
     }
 
-    // Parse quoted executable `"C:\path\uninst.exe" /arg1 /arg2`
-    let (exe_part, args_part) = if let Some(rest) = raw.strip_prefix('"') {
+    // Case 2: Standard or quoted executable (`"C:\path\uninst.exe" /arg1 /arg2` or `C:\path\uninst.exe /S`)
+    let (exe_part, args_part) = split_executable_and_args(raw);
+
+    shell_execute_command(exe_part, args_part)?;
+
+    Ok(format!(
+        "Avviato disinstallatore per '{}': \"{exe_part}\" {args_part}",
+        app.display_name
+    ))
+}
+
+/// Splits a raw Windows command string into `(executable_path, arguments)`.
+pub fn split_executable_and_args(raw: &str) -> (&str, &str) {
+    let trimmed = raw.trim();
+    if let Some(rest) = trimmed.strip_prefix('"') {
         if let Some(end_q) = rest.find('"') {
-            (&rest[..end_q], rest[end_q + 1..].trim())
-        } else {
-            (raw, "")
+            return (&rest[..end_q], rest[end_q + 1..].trim());
         }
-    } else if let Some(idx) = raw.to_lowercase().find(".exe") {
-        let split_at = idx + 4;
-        (raw[..split_at].trim(), raw[split_at..].trim())
-    } else {
-        (raw, "")
+    }
+    let lower = trimmed.to_lowercase();
+    for ext in [".exe", ".msi", ".bat", ".cmd"] {
+        if let Some(idx) = lower.find(ext) {
+            let split_at = idx + ext.len();
+            return (trimmed[..split_at].trim(), trimmed[split_at..].trim());
+        }
+    }
+    match trimmed.split_once(' ') {
+        Some((exe, args)) => (exe.trim(), args.trim()),
+        None => (trimmed, ""),
+    }
+}
+
+fn to_wide_null(s: &str) -> Vec<u16> {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
+}
+
+/// Executes `file` with `params` via Win32 `ShellExecuteW`, automatically triggering
+/// the Windows UAC elevation dialog if the uninstaller requires Administrator rights.
+fn shell_execute_command(file: &str, params: &str) -> Result<(), String> {
+    use std::ptr;
+    use windows_sys::Win32::Foundation::HWND;
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    let verb_open = to_wide_null("open");
+    let file_w = to_wide_null(file);
+    let params_w = to_wide_null(params);
+
+    let res = unsafe {
+        ShellExecuteW(
+            ptr::null_mut() as HWND,
+            verb_open.as_ptr(),
+            file_w.as_ptr(),
+            if params.is_empty() {
+                ptr::null()
+            } else {
+                params_w.as_ptr()
+            },
+            ptr::null(),
+            SW_SHOWNORMAL,
+        )
     };
 
-    let mut cmd = Command::new(exe_part);
-    if !args_part.is_empty() {
-        cmd.raw_arg_or_split(args_part);
+    if (res as isize) > 32 {
+        return Ok(());
     }
-    cmd.spawn()
-        .map_err(|e| format!("Impossibile avviare '{}': {e}", exe_part))?;
 
-    Ok(format!("Avviato disinstallatore: \"{exe_part}\" {args_part}"))
-}
+    // If access denied (SE_ERR_ACCESSDENIED == 5), retry with `"runas"` verb to force UAC prompt
+    if (res as isize) == 5 {
+        let verb_runas = to_wide_null("runas");
+        let res_elev = unsafe {
+            ShellExecuteW(
+                ptr::null_mut() as HWND,
+                verb_runas.as_ptr(),
+                file_w.as_ptr(),
+                if params.is_empty() {
+                    ptr::null()
+                } else {
+                    params_w.as_ptr()
+                },
+                ptr::null(),
+                SW_SHOWNORMAL,
+            )
+        };
+        if (res_elev as isize) > 32 {
+            return Ok(());
+        }
+    }
 
-trait RawArgExt {
-    fn raw_arg_or_split(&mut self, args_str: &str) -> &mut Self;
-}
-
-impl RawArgExt for Command {
-    fn raw_arg_or_split(&mut self, args_str: &str) -> &mut Self {
+    // Fallback to `cmd.exe /C start` if ShellExecuteW returned <= 32
+    let mut cmd = Command::new(file);
+    if !params.is_empty() {
         use std::os::windows::process::CommandExt;
-        self.raw_arg(args_str)
+        cmd.raw_arg(params);
     }
+    cmd.spawn().map(|_| ()).map_err(|e| {
+        format!(
+            "Impossibile avviare '{}' (ShellExecuteW code {}): {}",
+            file, res as isize, e
+        )
+    })
 }

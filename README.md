@@ -1,6 +1,6 @@
 # 🦀 RustCleaner
 
-[![Status: Mega Alpha](https://img.shields.io/badge/Status-MEGA%20ALPHA%20(v1.0.0--alpha)-red?style=for-the-badge)](#)
+[![Status: Mega Alpha](https://img.shields.io/badge/Status-MEGA%20ALPHA%20(v1.2.0--alpha)-red?style=for-the-badge)](#)
 [![Rust](https://img.shields.io/badge/Language-Rust%202021-orange?style=for-the-badge&logo=rust)](https://www.rust-lang.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(x64)-0078D6?style=for-the-badge&logo=windows)](https://microsoft.com/windows)
 [![Zero Telemetry](https://img.shields.io/badge/Privacy-Zero%20Telemetry%20%E2%80%A2%200%20MB%20Background%20RAM-10B981?style=for-the-badge)](#)
@@ -13,7 +13,7 @@
 ## 🇬🇧 English Documentation
 
 > [!WARNING]
-> **⚠️ MEGA ALPHA / EARLY EXPERIMENTAL PREVIEW (`v1.0.0-alpha`)**
+> **⚠️ MEGA ALPHA / EARLY EXPERIMENTAL PREVIEW (`v1.2.0-alpha`)**
 > **RustCleaner** is currently in a **Mega Alpha** stage of development. Although it implements non-destructive dry-run analysis and mandatory `.reg` backups before any Windows Registry repair, use it at your own risk and always review the detected items before cleaning.
 
 **RustCleaner** is a fast, lightweight, zero-dependency, **zero-telemetry** Windows system maintenance, privacy, software/driver updater, and disk optimization utility written entirely in **Rust**.
@@ -53,7 +53,7 @@ It ships as a single **100% standalone portable `.exe`** (~6.3 MB, statically li
 ## 🇮🇹 Documentazione in Italiano
 
 > [!WARNING]
-> **⚠️ VERSIONE MEGA ALPHA / ANTEPRIMA SPERIMENTALE (`v1.0.0-alpha`)**
+> **⚠️ VERSIONE MEGA ALPHA / ANTEPRIMA SPERIMENTALE (`v1.2.0-alpha`)**
 > **RustCleaner** si trova attualmente in stato di **Mega Alpha**. Sebbene includa la modalità di sola analisi (non distruttiva) e il salvataggio obbligatorio del backup `.reg` prima di ogni intervento sul Registro di Windows, il software è sperimentale: utilizzalo con cautela controllando sempre gli elementi rilevati prima della pulizia.
 
 **RustCleaner** è un'utility leggera, veloce, **100% priva di telemetria** e completamente portatile per la pulizia del file system, la manutenzione del registro, l'aggiornamento di software/driver e la tutela della privacy su Windows, scritta interamente in **Rust**.
