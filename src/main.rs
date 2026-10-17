@@ -1,10 +1,15 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-//! RustCleaner [MEGA ALPHA] — Windows System Cleaner, Registry Maintenance & Optimizer in Rust.
-//! Supports both a classic Desktop GUI (`eframe`/`egui`) and full CLI subcommands (`clap`).
+//! RustCleaner [MEGA ALPHA] — Windows System Cleaner, Registry Maintenance, Winget Software Updater,
+//! Official Windows Update Driver Updater, Zero-RAM Task Scheduler & Kernel File Monitor in Rust.
+//! Supports both a modern Obsidian Desktop GUI (`eframe`/`egui`) and full CLI subcommands (`clap`).
 
 pub mod cleaner;
+pub mod driver_updater;
 pub mod gui;
+pub mod monitor;
 pub mod registry;
+pub mod scheduler;
+pub mod software_updater;
 pub mod startup_uninstall;
 pub mod uac;
 pub mod wiper;
@@ -18,12 +23,16 @@ use std::sync::{Arc, Mutex};
 #[command(
     name = "rustcleaner",
     version = "0.1.0-alpha",
-    about = "[MEGA ALPHA] Utility di pulizia e ottimizzazione per Windows scritta in Rust (Pulizia File/Browser, Registro con Backup .reg, Startup, Uninstaller e Bonifica Spazio Libero)"
+    about = "[MEGA ALPHA] Utility di pulizia, aggiornamento e ottimizzazione per Windows scritta in Rust (Zero Telemetria, 0 MB RAM in background)"
 )]
 struct Cli {
     /// Richiede automaticamente l'elevazione UAC (Amministratore) all'avvio se non già elevato
     #[arg(long)]
     elevate: bool,
+
+    /// Esegue la pulizia silenziosa in background (usato da Windows Task Scheduler `schtasks.exe`) e termina subito (0 RAM)
+    #[arg(long)]
+    silent_clean: bool,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -59,9 +68,21 @@ enum Commands {
         #[arg(long, default_value_t = 32)]
         limit_mb: u64,
     },
+    /// 5. Cerca aggiornamenti software tramite il gestore ufficiale Microsoft Winget
+    SoftwareUpdates,
+    /// 6. Scansiona i driver hardware PnP e cerca aggiornamenti certificati su Windows Update (WUApiLib COM)
+    DriverScan,
+    /// 7. Mostra lo stato della Pulizia Programmata nell'Utilità di Pianificazione di Windows (schtasks)
+    ScheduleStatus,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Check if invoked with `--silent-clean` by Windows Task Scheduler: run headless without attaching console
+    if std::env::args().any(|a| a == "--silent-clean") {
+        let _ = scheduler::run_silent_clean_and_log();
+        return Ok(());
+    }
+
     // In release builds (`windows_subsystem = "windows"`), attach to the parent terminal
     // if the user invoked the binary with CLI arguments (e.g. `rustcleaner.exe analyze` or `--help`).
     #[cfg(windows)]
@@ -74,6 +95,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let cli = Cli::parse();
 
+    if cli.silent_clean {
+        let _ = scheduler::run_silent_clean_and_log();
+        return Ok(());
+    }
+
     if cli.elevate && !uac::is_elevated() {
         println!("[UAC] Richiesta privilegi di Amministratore tramite ShellExecuteW(\"runas\")...");
         uac::relaunch_as_admin(&[])?;
@@ -82,21 +108,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match cli.command {
         None => {
-            // Launch Desktop GUI
             let native_options = eframe::NativeOptions {
                 viewport: eframe::egui::ViewportBuilder::default()
-                    .with_inner_size([1180.0, 720.0])
-                    .with_min_inner_size([980.0, 620.0])
-                    .with_title("RustCleaner v0.1.0-alpha [MEGA ALPHA] — Windows System Cleaner"),
+                    .with_inner_size([1220.0, 750.0])
+                    .with_min_inner_size([1020.0, 640.0])
+                    .with_title("RustCleaner v0.1.0-alpha [MEGA ALPHA] — Zero-Telemetry Windows Optimizer"),
                 ..Default::default()
             };
             eframe::run_native(
                 "RustCleaner",
                 native_options,
-                Box::new(|cc| {
-                    cc.egui_ctx.set_visuals(eframe::egui::Visuals::dark());
-                    Ok(Box::new(gui::RustCleanerApp::default()))
-                }),
+                Box::new(|_cc| Ok(Box::new(gui::RustCleanerApp::default()))),
             )?;
         }
         Some(Commands::Analyze) => {
@@ -212,9 +234,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
             let prog = Arc::new(Mutex::new(wiper::WipeProgress::default()));
             let cancel = Arc::new(AtomicBool::new(false));
-            let written = wiper::wipe_free_space(&drive, alg, true, Some(limit_mb), prog.clone(), cancel)?;
+            let written =
+                wiper::wipe_free_space(&drive, alg, true, Some(limit_mb), prog.clone(), cancel)?;
             let final_msg = prog.lock().unwrap().status_message.clone();
             println!("{final_msg} (Byte scritti: {written})");
+        }
+        Some(Commands::SoftwareUpdates) => {
+            println!("=== RustCleaner: Software Updater (Microsoft Winget) ===");
+            let rep = software_updater::check_for_updates();
+            println!("{}", rep.raw_message);
+            for u in &rep.updates {
+                println!(
+                    "  • {:32} | {:28} | {} -> {} ({})",
+                    u.name, u.id, u.current_version, u.available_version, u.source
+                );
+            }
+        }
+        Some(Commands::DriverScan) => {
+            println!("=== RustCleaner: Driver Updater (Windows Update WUApiLib COM + PnP) ===");
+            let rep = driver_updater::scan_drivers(true);
+            println!("{}", rep.status_message);
+            for d in &rep.wu_pending_drivers {
+                println!(
+                    "  [AGGIORNAMENTO WU] {} ({} - {}, {:.2} MB)",
+                    d.title, d.driver_manufacturer, d.driver_ver_date, d.size_mb
+                );
+            }
+        }
+        Some(Commands::ScheduleStatus) => {
+            println!("=== RustCleaner: Stato Pulizia Programmata (schtasks.exe) ===");
+            let st = scheduler::query_scheduled_task();
+            println!(
+                "Attiva: {} | Stato: {} | Prossima esecuzione: {}",
+                st.exists, st.status, st.next_run_time
+            );
         }
     }
 

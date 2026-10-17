@@ -9,6 +9,8 @@
 
 # Local standalone binaries in root (keep releases in GitHub Releases)
 /*.exe
+/*.old_exe
+/*.log
 
 # IDE & OS metadata
 .vscode/
