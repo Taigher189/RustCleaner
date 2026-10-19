@@ -1,6 +1,6 @@
 [package]
 name = "rustcleaner"
-version = "1.2.0-alpha"
+version = "1.3.0-alpha"
 edition = "2021"
 description = "[MEGA ALPHA] Lightweight, standalone Windows system cleaner, registry maintenance utility with automatic .reg backup, startup/uninstaller manager, and low-level free space wiper written in Rust."
 authors = ["Taigher189"]

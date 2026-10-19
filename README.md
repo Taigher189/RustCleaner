@@ -13,7 +13,7 @@
 ## 🇬🇧 English Documentation
 
 > [!WARNING]
-> **⚠️ MEGA ALPHA / EARLY EXPERIMENTAL PREVIEW (`v1.2.0-alpha`)**
+> **⚠️ MEGA ALPHA / EARLY EXPERIMENTAL PREVIEW (`v1.3.0-alpha`)**
 > **RustCleaner** is currently in a **Mega Alpha** stage of development. Although it implements non-destructive dry-run analysis and mandatory `.reg` backups before any Windows Registry repair, use it at your own risk and always review the detected items before cleaning.
 
 **RustCleaner** is a fast, lightweight, zero-dependency, **zero-telemetry** Windows system maintenance, privacy, software/driver updater, and disk optimization utility written entirely in **Rust**.
@@ -53,7 +53,7 @@ It ships as a single **100% standalone portable `.exe`** (~6.3 MB, statically li
 ## 🇮🇹 Documentazione in Italiano
 
 > [!WARNING]
-> **⚠️ VERSIONE MEGA ALPHA / ANTEPRIMA SPERIMENTALE (`v1.2.0-alpha`)**
+> **⚠️ VERSIONE MEGA ALPHA / ANTEPRIMA SPERIMENTALE (`v1.3.0-alpha`)**
 > **RustCleaner** si trova attualmente in stato di **Mega Alpha**. Sebbene includa la modalità di sola analisi (non distruttiva) e il salvataggio obbligatorio del backup `.reg` prima di ogni intervento sul Registro di Windows, il software è sperimentale: utilizzalo con cautela controllando sempre gli elementi rilevati prima della pulizia.
 
 **RustCleaner** è un'utility leggera, veloce, **100% priva di telemetria** e completamente portatile per la pulizia del file system, la manutenzione del registro, l'aggiornamento di software/driver e la tutela della privacy su Windows, scritta interamente in **Rust**.

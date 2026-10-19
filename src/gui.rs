@@ -1050,7 +1050,7 @@ impl eframe::App for RustCleanerApp {
                             );
                             draw_pill_badge(
                                 ui,
-                                "v1.2.0-alpha",
+                                "v1.3.0-alpha",
                                 Color32::from_rgba_unmultiplied(
                                     pal.accent_rust.r(),
                                     pal.accent_rust.g(),
