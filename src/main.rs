@@ -89,8 +89,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(windows)]
     if std::env::args_os().len() > 1 {
         unsafe {
-            use windows_sys::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
-            let _ = AttachConsole(ATTACH_PARENT_PROCESS);
+            use windows_sys::Win32::Storage::FileSystem::{
+                CreateFileW, FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_SHARE_READ,
+                FILE_SHARE_WRITE, OPEN_EXISTING,
+            };
+            use windows_sys::Win32::System::Console::{
+                AttachConsole, SetStdHandle, ATTACH_PARENT_PROCESS, STD_ERROR_HANDLE,
+                STD_OUTPUT_HANDLE,
+            };
+
+            if AttachConsole(ATTACH_PARENT_PROCESS) != 0 {
+                let conout: Vec<u16> = "CONOUT$\0".encode_utf16().collect();
+                let handle = CreateFileW(
+                    conout.as_ptr(),
+                    FILE_GENERIC_READ | FILE_GENERIC_WRITE,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE,
+                    std::ptr::null(),
+                    OPEN_EXISTING,
+                    0,
+                    std::ptr::null_mut(),
+                );
+                if handle != windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE {
+                    SetStdHandle(STD_OUTPUT_HANDLE, handle);
+                    SetStdHandle(STD_ERROR_HANDLE, handle);
+                }
+            }
         }
     }
 

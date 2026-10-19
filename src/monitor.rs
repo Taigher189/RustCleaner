@@ -35,7 +35,7 @@ impl Default for RealtimeMonitorState {
     fn default() -> Self {
         Self {
             active: false,
-            watched_paths: default_watched_Targets(),
+            watched_paths: default_watched_targets(),
             events: Vec::new(),
             total_events_received: 0,
             auto_clean_on_browser_close: true,
@@ -45,8 +45,7 @@ impl Default for RealtimeMonitorState {
     }
 }
 
-#[allow(non_snake_case)]
-fn default_watched_Targets() -> Vec<(String, PathBuf)> {
+fn default_watched_targets() -> Vec<(String, PathBuf)> {
     let candidates = [
         ("Windows %TEMP%", r"%TEMP%"),
         (
@@ -101,6 +100,11 @@ pub fn start_realtime_watcher(
             let _ = watcher.watch(path, RecursiveMode::NonRecursive);
         }
 
+        // Debounce timer to prevent recursive event cascades when temp files are deleted
+        let mut last_auto_clean = std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_secs(60))
+            .unwrap_or_else(std::time::Instant::now);
+
         // Sleep waiting on OS kernel events (with 400ms recv_timeout only to check the stop flag)
         while !stop_flag.load(Ordering::Relaxed) {
             if let Ok(Ok(event)) = rx.recv_timeout(std::time::Duration::from_millis(400)) {
@@ -137,12 +141,15 @@ pub fn start_realtime_watcher(
                         || fname_low.ends_with("-journal"));
 
                 let mut auto_msg = None;
+                let now = std::time::Instant::now();
+                let on_cooldown = now.duration_since(last_auto_clean) < std::time::Duration::from_secs(15);
                 let should_auto_clean = state_arc
                     .lock()
-                    .map(|s| s.auto_clean_on_browser_close && is_browser_lock_release)
+                    .map(|s| s.auto_clean_on_browser_close && is_browser_lock_release && !on_cooldown)
                     .unwrap_or(false);
 
                 if should_auto_clean {
+                    last_auto_clean = now;
                     let rules = default_clean_rules();
                     let summary = execute_clean(&rules);
                     let msg = format!(

@@ -200,13 +200,22 @@ fn probe_file_lock(path: &Path) -> (bool, Option<String>) {
         }
     }
 
+    // If the file is marked read-only, clear the attribute so we can accurately probe for file locks
+    if let Ok(meta) = path.metadata() {
+        let mut perms = meta.permissions();
+        if perms.readonly() {
+            perms.set_readonly(false);
+            let _ = fs::set_permissions(path, perms);
+        }
+    }
+
     match OpenOptions::new().write(true).open(path) {
         Ok(_) => (false, None),
         Err(e) => {
             let code = e.raw_os_error().unwrap_or(0);
             let msg = match code {
                 32 | 33 => format!("File in uso da un altro processo (OS error {code})"),
-                5 => "Accesso negato (richiede privilegi UAC o file sola lettura)".to_string(),
+                5 => "Accesso negato (richiede privilegi UAC o file protetto)".to_string(),
                 _ => format!("Impossibile accedere: {e}"),
             };
             (true, Some(msg))
@@ -698,11 +707,21 @@ pub fn execute_clean(rules: &[CleanRule]) -> CleanSummary {
                 std::ptr::null(),
                 SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI | SHERB_NOSOUND,
             );
-            if hr != 0 && hr != -2147418113 {
-                // -2147418113 (0x8000FFFF) can happen when Recycle Bin is already empty
+            let hr_u32 = hr as u32;
+            // 0 = S_OK
+            // 0x80004005 = E_FAIL (already empty on Win10/11)
+            // 0x8000FFFF = E_UNEXPECTED (already empty or no items)
+            // 0x80070002 = ERROR_FILE_NOT_FOUND (no items in recycle bin)
+            // 0x80070015 = ERROR_NOT_READY (unmounted or removable drive empty)
+            if hr != 0
+                && hr_u32 != 0x80004005
+                && hr_u32 != 0x8000FFFF
+                && hr_u32 != 0x80070002
+                && hr_u32 != 0x80070015
+            {
                 errors.push(format!(
                     "Regola '{}' (SHEmptyRecycleBinW): codice HRESULT 0x{:08X}",
-                    rule.name, hr as u32
+                    rule.name, hr_u32
                 ));
             }
         }
@@ -714,6 +733,15 @@ pub fn execute_clean(rules: &[CleanRule]) -> CleanSummary {
                 skipped_locked += 1;
                 continue;
             }
+            // Ensure read-only flag is cleared before removal so Windows doesn't reject with PermissionDenied
+            if let Ok(meta) = item.path.metadata() {
+                let mut perms = meta.permissions();
+                if perms.readonly() {
+                    perms.set_readonly(false);
+                    let _ = fs::set_permissions(&item.path, perms);
+                }
+            }
+
             match fs::remove_file(&item.path) {
                 Ok(()) => {
                     deleted_files += 1;
@@ -731,11 +759,45 @@ pub fn execute_clean(rules: &[CleanRule]) -> CleanSummary {
         }
     }
 
+    // Prune leftover empty subdirectories inside recursive rule target directories
+    for rule in rules.iter().filter(|r| r.enabled && !r.special_recycle_bin) {
+        for target in &rule.targets {
+            if target.recursive {
+                let base = expand_env_vars(&target.base_dir);
+                prune_empty_subdirs(&base);
+            }
+        }
+    }
+
     summary.total_files_deleted = deleted_files;
     summary.total_bytes_deleted = deleted_bytes;
     summary.total_skipped_locked = skipped_locked;
     summary.errors = errors;
     summary
+}
+
+/// Safely prunes empty subdirectories inside `base_dir` bottom-up.
+/// Only removes child subdirectories that are completely empty. Never removes `base_dir` itself.
+pub fn prune_empty_subdirs(base_dir: &Path) {
+    if !base_dir.is_dir() {
+        return;
+    }
+    let mut dirs: Vec<PathBuf> = WalkDir::new(base_dir)
+        .min_depth(1)
+        .max_depth(16)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_dir())
+        .map(|e| e.path().to_path_buf())
+        .collect();
+
+    // Sort descending by component depth so deepest subdirectories are deleted first
+    dirs.sort_by(|a, b| b.components().count().cmp(&a.components().count()));
+
+    for dir in dirs {
+        // fs::remove_dir succeeds strictly on empty directories; fails safely if files remain
+        let _ = fs::remove_dir(dir);
+    }
 }
 
 /// Formats a byte count into human-readable units (B, KB, MB, GB).
@@ -785,6 +847,25 @@ mod tests {
     fn test_default_rules_non_empty() {
         let rules = default_clean_rules();
         assert!(rules.len() >= 15);
+    }
+
+    #[test]
+    fn test_prune_empty_subdirs() {
+        let base = std::env::temp_dir().join("rustcleaner_test_prune");
+        let empty_sub = base.join("empty1").join("empty2");
+        let non_empty_sub = base.join("non_empty");
+        let _ = fs::create_dir_all(&empty_sub);
+        let _ = fs::create_dir_all(&non_empty_sub);
+        let keep_file = non_empty_sub.join("keep.txt");
+        let _ = fs::write(&keep_file, "keep");
+
+        prune_empty_subdirs(&base);
+
+        assert!(base.exists(), "base dir should not be deleted");
+        assert!(!empty_sub.exists(), "empty nested subdir should be pruned");
+        assert!(keep_file.exists(), "file in non-empty subdir should remain");
+
+        let _ = fs::remove_dir_all(&base);
     }
 }
 

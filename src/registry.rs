@@ -54,6 +54,18 @@ impl RegistryCategory {
         }
     }
 
+    pub fn friendly_title(&self) -> &'static str {
+        match self {
+            RegistryCategory::SharedDlls => "DLL Condivise",
+            RegistryCategory::AppPaths => "Percorsi Applicazioni",
+            RegistryCategory::FileExts => "Estensioni File",
+            RegistryCategory::MuiCache => "Cache MUI",
+            RegistryCategory::AppCompatFlags => "Compatibilità Applicazioni",
+            RegistryCategory::RunStartupOrphans => "Voci di Avvio Orfane",
+            RegistryCategory::InstallerFolders => "Cartelle di Installazione",
+        }
+    }
+
     pub fn label(&self) -> &'static str {
         match self {
             RegistryCategory::SharedDlls => "DLL Condivise Mancanti (R_SHARED_DLLS)",
@@ -184,14 +196,25 @@ pub fn extract_executable_path(raw: &str) -> Option<PathBuf> {
         }
     }
 
-    // Otherwise look for `.exe`, `.dll`, `.ocx`, `.hlp`, `.chm` boundary
+    // Otherwise look for `.exe`, `.dll`, `.ocx`, `.hlp`, `.chm` boundary from right to left
     let lower = s.to_lowercase();
     for ext in [".exe", ".dll", ".ocx", ".sys", ".chm", ".hlp"] {
-        if let Some(idx) = lower.find(ext) {
-            let candidate = s[..idx + ext.len()].trim().trim_matches('"');
-            if candidate.len() > 3 && candidate.as_bytes().get(1) == Some(&b':') {
-                return Some(PathBuf::from(candidate));
+        let mut search_slice = lower.as_str();
+        while let Some(idx) = search_slice.rfind(ext) {
+            let end_idx = idx + ext.len();
+            // Extension must be at the end of the string or followed by a delimiter (space, switch, comma, quote)
+            let is_boundary = end_idx == search_slice.len()
+                || matches!(
+                    search_slice.as_bytes().get(end_idx),
+                    Some(b' ' | b'\t' | b'/' | b'-' | b',' | b'"')
+                );
+            if is_boundary {
+                let candidate = s[..end_idx].trim().trim_matches('"');
+                if candidate.len() > 3 && candidate.as_bytes().get(1) == Some(&b':') {
+                    return Some(PathBuf::from(candidate));
+                }
             }
+            search_slice = &search_slice[..idx];
         }
     }
 
@@ -465,12 +488,22 @@ pub fn export_reg_backup(issues: &[RegistryIssue], backup_dir: &Path) -> Result<
                 original_data,
                 is_dword,
             } => {
-                let escaped_name = escape_reg_str(value_name);
+                let is_default_val = value_name.is_empty() || value_name == "@";
                 if *is_dword {
-                    content.push_str(&format!("\"{escaped_name}\"=dword:{original_data}\r\n\r\n"));
+                    if is_default_val {
+                        content.push_str(&format!("@=dword:{original_data}\r\n\r\n"));
+                    } else {
+                        let escaped_name = escape_reg_str(value_name);
+                        content.push_str(&format!("\"{escaped_name}\"=dword:{original_data}\r\n\r\n"));
+                    }
                 } else {
                     let escaped_val = escape_reg_str(original_data);
-                    content.push_str(&format!("\"{escaped_name}\"=\"{escaped_val}\"\r\n\r\n"));
+                    if is_default_val {
+                        content.push_str(&format!("@=\"{escaped_val}\"\r\n\r\n"));
+                    } else {
+                        let escaped_name = escape_reg_str(value_name);
+                        content.push_str(&format!("\"{escaped_name}\"=\"{escaped_val}\"\r\n\r\n"));
+                    }
                 }
             }
             RegTargetAction::DeleteSubkey { default_value } => {
@@ -573,6 +606,10 @@ mod tests {
 
         let p2 = extract_executable_path(r"C:\Windows\System32\notepad.exe /A file.txt").unwrap();
         assert_eq!(p2, PathBuf::from(r"C:\Windows\System32\notepad.exe"));
+
+        // Nested directory with .exe in folder name
+        let p3 = extract_executable_path(r"C:\Games\Game.exe.backup\launcher.exe -silent").unwrap();
+        assert_eq!(p3, PathBuf::from(r"C:\Games\Game.exe.backup\launcher.exe"));
     }
 
     #[test]
@@ -586,7 +623,7 @@ mod tests {
     #[test]
     fn test_export_reg_backup_creates_valid_file() {
         let temp_dir = std::env::temp_dir().join("rustcleaner_test_backup");
-        let issue = RegistryIssue {
+        let issue1 = RegistryIssue {
             selected: true,
             category: RegistryCategory::SharedDlls,
             problem_description: "DLL condivisa mancante".to_string(),
@@ -599,10 +636,25 @@ mod tests {
                 is_dword: true,
             },
         };
-        let path = export_reg_backup(&[issue], &temp_dir).expect("backup should succeed");
+        // Test default value formatting (@="...")
+        let issue2 = RegistryIssue {
+            selected: true,
+            category: RegistryCategory::AppPaths,
+            problem_description: "Percorso applicazione orfano".to_string(),
+            data_reference: r"C:\NonExistent\app.exe".to_string(),
+            hive: HiveRoot::Hkcu,
+            key_path: r"Software\Microsoft\Windows\CurrentVersion\App Paths\test.exe".to_string(),
+            action: RegTargetAction::DeleteValue {
+                value_name: String::new(),
+                original_data: r"C:\NonExistent\app.exe".to_string(),
+                is_dword: false,
+            },
+        };
+        let path = export_reg_backup(&[issue1, issue2], &temp_dir).expect("backup should succeed");
         let text = fs::read_to_string(&path).expect("read backup");
         assert!(text.starts_with("Windows Registry Editor Version 5.00"));
         assert!(text.contains(r#""C:\\Missing\\lib.dll"=dword:00000001"#));
+        assert!(text.contains(r#"@="C:\\NonExistent\\app.exe""#));
         let _ = fs::remove_dir_all(&temp_dir);
     }
 }

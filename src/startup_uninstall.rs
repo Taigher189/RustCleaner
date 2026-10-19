@@ -41,6 +41,13 @@ impl StartupSource {
             StartupSource::StartupFolderCommon => "Startup Common",
         }
     }
+
+    pub fn requires_admin(&self) -> bool {
+        matches!(
+            self,
+            StartupSource::HklmRun | StartupSource::HklmWow64Run | StartupSource::StartupFolderCommon
+        )
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -438,9 +445,18 @@ pub fn split_executable_and_args(raw: &str) -> (&str, &str) {
     }
     let lower = trimmed.to_lowercase();
     for ext in [".exe", ".msi", ".bat", ".cmd"] {
-        if let Some(idx) = lower.find(ext) {
+        let mut search_slice = lower.as_str();
+        while let Some(idx) = search_slice.rfind(ext) {
             let split_at = idx + ext.len();
-            return (trimmed[..split_at].trim(), trimmed[split_at..].trim());
+            let is_boundary = split_at == trimmed.len()
+                || matches!(
+                    trimmed.as_bytes().get(split_at),
+                    Some(b' ' | b'\t' | b'/' | b'-' | b',')
+                );
+            if is_boundary {
+                return (trimmed[..split_at].trim(), trimmed[split_at..].trim());
+            }
+            search_slice = &search_slice[..idx];
         }
     }
     match trimmed.split_once(' ') {
@@ -520,4 +536,41 @@ fn shell_execute_command(file: &str, params: &str) -> Result<(), String> {
             file, res as isize, e
         )
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_split_executable_and_args() {
+        // Quoted path
+        let (exe, args) = split_executable_and_args(r#""C:\Program Files\App\uninst.exe" /S"#);
+        assert_eq!(exe, r#"C:\Program Files\App\uninst.exe"#);
+        assert_eq!(args, "/S");
+
+        // Unquoted path with .exe in folder name
+        let (exe, args) = split_executable_and_args(r#"C:\Games\Game.exe.backup\launcher.exe -silent"#);
+        assert_eq!(exe, r#"C:\Games\Game.exe.backup\launcher.exe"#);
+        assert_eq!(args, "-silent");
+
+        // Simple unquoted executable with no args
+        let (exe, args) = split_executable_and_args(r#"C:\Windows\System32\cmd.exe"#);
+        assert_eq!(exe, r#"C:\Windows\System32\cmd.exe"#);
+        assert_eq!(args, "");
+
+        // Batch file with switch
+        let (exe, args) = split_executable_and_args(r#"C:\Scripts\cleanup.bat /all"#);
+        assert_eq!(exe, r#"C:\Scripts\cleanup.bat"#);
+        assert_eq!(args, "/all");
+    }
+
+    #[test]
+    fn test_startup_source_requires_admin() {
+        assert!(StartupSource::HklmRun.requires_admin());
+        assert!(StartupSource::HklmWow64Run.requires_admin());
+        assert!(StartupSource::StartupFolderCommon.requires_admin());
+        assert!(!StartupSource::HkcuRun.requires_admin());
+        assert!(!StartupSource::StartupFolderUser.requires_admin());
+    }
 }

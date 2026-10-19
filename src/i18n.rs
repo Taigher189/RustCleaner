@@ -8,6 +8,7 @@
 //! - 中文 (`ZH` - Simplified Chinese)
 //! - Português (`PT`)
 
+use crate::registry::RegistryCategory;
 use crate::scheduler::ScheduleFrequency;
 use crate::wiper::WipeAlgorithm;
 
@@ -251,6 +252,66 @@ impl Language {
             (Language::Portuguese, ScheduleFrequency::OnLogon) => "Ao iniciar sessão no Windows",
         }
     }
+
+    pub fn localize_reg_category(&self, cat: RegistryCategory) -> (&'static str, &'static str) {
+        match (self, cat) {
+            (Language::Italian, RegistryCategory::SharedDlls) => ("DLL Condivise", "Riferimenti a DLL condivise mancanti nel file system"),
+            (Language::Italian, RegistryCategory::AppPaths) => ("Percorsi Applicazioni", "Chiavi App Paths che puntano a file eseguibili inesistenti"),
+            (Language::Italian, RegistryCategory::FileExts) => ("Estensioni File", "Associazioni di estensioni file orfane o con comandi non validi"),
+            (Language::Italian, RegistryCategory::MuiCache) => ("Cache MUI", "Voci di interfaccia MUI per applicazioni non più presenti sul disco"),
+            (Language::Italian, RegistryCategory::AppCompatFlags) => ("Compatibilità Applicazioni", "Flag di compatibilità memorizzati per file rimossi"),
+            (Language::Italian, RegistryCategory::RunStartupOrphans) => ("Avvio Orfano", "Chiavi di esecuzione automatica che puntano a file inesistenti"),
+            (Language::Italian, RegistryCategory::InstallerFolders) => ("Cartelle Installer", "Registrazioni di cartelle di installazione Windows rimosse"),
+
+            (Language::English, RegistryCategory::SharedDlls) => ("Shared DLLs", "References to shared DLLs missing from the file system"),
+            (Language::English, RegistryCategory::AppPaths) => ("Application Paths", "App Paths keys pointing to non-existent executable binaries"),
+            (Language::English, RegistryCategory::FileExts) => ("File Extensions", "Orphaned file extension associations with invalid open commands"),
+            (Language::English, RegistryCategory::MuiCache) => ("MUI Cache", "MUI Cache string entries for applications no longer on disk"),
+            (Language::English, RegistryCategory::AppCompatFlags) => ("App Compatibility", "Persisted compatibility flags for removed applications"),
+            (Language::English, RegistryCategory::RunStartupOrphans) => ("Orphaned Startup", "Run registry keys pointing to missing executable files"),
+            (Language::English, RegistryCategory::InstallerFolders) => ("Installer Folders", "Windows Installer registered directory paths that no longer exist"),
+
+            (Language::French, RegistryCategory::SharedDlls) => ("DLL Partagées", "Références aux DLL partagées absentes du système"),
+            (Language::French, RegistryCategory::AppPaths) => ("Chemins d'Applications", "Clés App Paths pointant vers des exécutables inexistants"),
+            (Language::French, RegistryCategory::FileExts) => ("Extensions de Fichiers", "Associations d'extensions orphelines ou invalides"),
+            (Language::French, RegistryCategory::MuiCache) => ("Cache MUI", "Entrées du cache MUI pour des applications absentes du disque"),
+            (Language::French, RegistryCategory::AppCompatFlags) => ("Compatibilité des Apps", "Paramètres de compatibilité persistants pour apps supprimées"),
+            (Language::French, RegistryCategory::RunStartupOrphans) => ("Démarrage Orphelin", "Clés d'exécution au démarrage pointant vers des fichiers absents"),
+            (Language::French, RegistryCategory::InstallerFolders) => ("Dossiers d'Installation", "Dossiers Windows Installer enregistrés mais inexistants"),
+
+            (Language::Spanish, RegistryCategory::SharedDlls) => ("DLL Compartidas", "Referencias a DLL compartidas ausentes en el disco"),
+            (Language::Spanish, RegistryCategory::AppPaths) => ("Rutas de Aplicaciones", "Claves App Paths que apuntan a binarios inexistentes"),
+            (Language::Spanish, RegistryCategory::FileExts) => ("Extensiones de Archivo", "Asociaciones de extensiones de archivo huérfanas o inválidas"),
+            (Language::Spanish, RegistryCategory::MuiCache) => ("Caché MUI", "Entradas de caché MUI para aplicaciones no encontradas en disco"),
+            (Language::Spanish, RegistryCategory::AppCompatFlags) => ("Compatibilidad de Apps", "Indicadores de compatibilidad guardados para apps eliminadas"),
+            (Language::Spanish, RegistryCategory::RunStartupOrphans) => ("Inicio Huérfano", "Claves de inicio automático que apuntan a archivos inexistentes"),
+            (Language::Spanish, RegistryCategory::InstallerFolders) => ("Carpetas de Instalación", "Rutas registradas de Windows Installer que ya no existen"),
+
+            (Language::German, RegistryCategory::SharedDlls) => ("Gemeinsame DLLs", "Fehlende gemeinsame DLL-Dateien im Dateisystem"),
+            (Language::German, RegistryCategory::AppPaths) => ("Anwendungspfade", "App Paths-Schlüssel mit Verweisen auf nicht vorhandene Dateien"),
+            (Language::German, RegistryCategory::FileExts) => ("Dateierweiterungen", "Verwaiste Dateityp-Zuordnungen mit ungültigen Befehlen"),
+            (Language::German, RegistryCategory::MuiCache) => ("MUI-Cache", "MUI-Cache-Einträge für nicht mehr vorhandene Anwendungen"),
+            (Language::German, RegistryCategory::AppCompatFlags) => ("App-Kompatibilität", "Gespeicherte Kompatibilitätsflags entfernter Programme"),
+            (Language::German, RegistryCategory::RunStartupOrphans) => ("Verwaister Autostart", "Autostart-Einträge mit ungültigen Dateipfaden"),
+            (Language::German, RegistryCategory::InstallerFolders) => ("Installer-Ordner", "Registrierte Windows Installer-Pfade, die nicht existieren"),
+
+            (Language::Chinese, RegistryCategory::SharedDlls) => ("共享 DLL", "文件系统中缺失的共享 DLL 注册表引用"),
+            (Language::Chinese, RegistryCategory::AppPaths) => ("应用程序路径", "指向已不存在的可执行文件的 App Paths 键"),
+            (Language::Chinese, RegistryCategory::FileExts) => ("文件扩展名关联", "无效或孤立的文件扩展名与打开方式关联"),
+            (Language::Chinese, RegistryCategory::MuiCache) => ("MUI 缓存", "已从磁盘删除的应用程序的 MUI 语言字符串缓存"),
+            (Language::Chinese, RegistryCategory::AppCompatFlags) => ("程序兼容性缓存", "针对已被删除程序的已保存兼容性设置"),
+            (Language::Chinese, RegistryCategory::RunStartupOrphans) => ("孤立开机自启项", "指向不存在可执行文件的开机自动启动注册表键"),
+            (Language::Chinese, RegistryCategory::InstallerFolders) => ("安装程序文件夹", "已在注册表中登记但已不存在的安装目录路径"),
+
+            (Language::Portuguese, RegistryCategory::SharedDlls) => ("DLLs Compartilhadas", "Referências a DLLs compartilhadas ausentes no sistema"),
+            (Language::Portuguese, RegistryCategory::AppPaths) => ("Caminhos de Aplicativos", "Chaves App Paths apontando para binários inexistentes"),
+            (Language::Portuguese, RegistryCategory::FileExts) => ("Extensões de Arquivo", "Associações de extensões de arquivo órfãs ou inválidas"),
+            (Language::Portuguese, RegistryCategory::MuiCache) => ("Cache MUI", "Entradas de cache MUI para aplicativos não encontrados no disco"),
+            (Language::Portuguese, RegistryCategory::AppCompatFlags) => ("Compatibilidade de Apps", "Sinalizadores de compatibilidade salvos para apps excluídos"),
+            (Language::Portuguese, RegistryCategory::RunStartupOrphans) => ("Inicialização Órfã", "Chaves de inicialização apontando para executáveis inexistentes"),
+            (Language::Portuguese, RegistryCategory::InstallerFolders) => ("Pastas do Instalador", "Pastas registradas do Windows Installer que não existem mais"),
+        }
+    }
 }
 
 pub struct Strings {
@@ -267,6 +328,10 @@ pub struct Strings {
     pub status_running: &'static str,
     pub default_banner_admin: &'static str,
     pub default_banner_user: &'static str,
+    pub btn_select_all: &'static str,
+    pub btn_deselect_all: &'static str,
+    pub lbl_search_filter: &'static str,
+    pub badge_admin_required: &'static str,
 
     // Sidebar
     pub sidebar_sec_maintenance: &'static str,
@@ -372,6 +437,7 @@ pub struct Strings {
     pub wiper_full_free_badge: &'static str,
     pub btn_start_wipe: &'static str,
     pub btn_stop_wipe: &'static str,
+    pub wiper_safety_note: &'static str,
 
     // 6. Software Updater Tab
     pub soft_title: &'static str,
@@ -448,6 +514,10 @@ pub static STRINGS_IT: Strings = Strings {
     status_running: "IN ESECUZIONE",
     default_banner_admin: "Pronto — Privilegi Amministratore (UAC) attivi • Zero Telemetria • 0 MB RAM in background.",
     default_banner_user: "Pronto — Modalità Utente Standard • Zero Telemetria. Usa 'Eleva UAC' per pulizia profonda di sistema.",
+    btn_select_all: "Seleziona Tutti",
+    btn_deselect_all: "Deseleziona Tutti",
+    lbl_search_filter: "Cerca...",
+    badge_admin_required: "Admin Richiesto",
 
     sidebar_sec_maintenance: "MANUTENZIONE & PULIZIA",
     sidebar_sec_premium: "FUNZIONI PREMIUM FREE",
@@ -547,6 +617,7 @@ pub static STRINGS_IT: Strings = Strings {
     wiper_full_free_badge: "100% Spazio Libero (-512 MB margine OS)",
     btn_start_wipe: "Avvia Bonifica Spazio Libero",
     btn_stop_wipe: "Interrompi Subito e Rilascia Spazio",
+    wiper_safety_note: "Sicurezza garantita: RustCleaner sovrascrive esclusivamente lo spazio libero non allocato. I file personali, le app e Windows restano intatti.",
 
     soft_title: "Software Updater (Microsoft Winget Nativo)",
     soft_subtitle: "Nessun database proprietario: interroga direttamente il Windows Package Manager ufficiale (winget upgrade).",
@@ -620,6 +691,10 @@ pub static STRINGS_EN: Strings = Strings {
     status_running: "RUNNING",
     default_banner_admin: "Ready — Administrator (UAC) privileges active • Zero Telemetry • 0 MB background RAM.",
     default_banner_user: "Ready — Standard User Mode • Zero Telemetry. Click 'Elevate UAC' for deep system cleaning.",
+    btn_select_all: "Select All",
+    btn_deselect_all: "Deselect All",
+    lbl_search_filter: "Search...",
+    badge_admin_required: "Admin Required",
 
     sidebar_sec_maintenance: "MAINTENANCE & CLEANING",
     sidebar_sec_premium: "FREE PREMIUM MODULES",
@@ -719,6 +794,7 @@ pub static STRINGS_EN: Strings = Strings {
     wiper_full_free_badge: "100% Free Space (-512 MB OS margin)",
     btn_start_wipe: "Start Free Space Wipe",
     btn_stop_wipe: "Abort Now & Release Space",
+    wiper_safety_note: "Safety guaranteed: RustCleaner only overwrites unallocated free space. Your personal files, applications, and Windows remain completely untouched.",
 
     soft_title: "Software Updater (Native Microsoft Winget)",
     soft_subtitle: "No proprietary database: queries the official Windows Package Manager directly (winget upgrade).",
@@ -792,6 +868,10 @@ pub static STRINGS_FR: Strings = Strings {
     status_running: "EN COURS",
     default_banner_admin: "Prêt — Privilèges Administrateur (UAC) actifs • Zéro Télémétrie • 0 Mo RAM en arrière-plan.",
     default_banner_user: "Prêt — Mode Utilisateur Standard • Zéro Télémétrie. Cliquez sur 'Élever UAC' pour un accès complet.",
+    btn_select_all: "Tout Sélectionner",
+    btn_deselect_all: "Tout Désélectionner",
+    lbl_search_filter: "Rechercher...",
+    badge_admin_required: "Admin Requis",
 
     sidebar_sec_maintenance: "MAINTENANCE & NETTOYAGE",
     sidebar_sec_premium: "FONCTIONS PREMIUM GRATUITES",
@@ -891,6 +971,7 @@ pub static STRINGS_FR: Strings = Strings {
     wiper_full_free_badge: "100% Espace Libre (-512 Mo marge OS)",
     btn_start_wipe: "Démarrer l'Effacement",
     btn_stop_wipe: "Arrêter Immédiatement",
+    wiper_safety_note: "Sécurité garantie: RustCleaner écrase uniquement l'espace libre non alloué. Vos fichiers personnels, applications et Windows restent intacts.",
 
     soft_title: "Software Updater (Microsoft Winget Natif)",
     soft_subtitle: "Aucune base de données propriétaire : interroge directement le gestionnaire officiel Winget.",
@@ -964,6 +1045,10 @@ pub static STRINGS_ES: Strings = Strings {
     status_running: "EJECUTANDO",
     default_banner_admin: "Listo — Privilegios de Administrador (UAC) activos • Cero Telemetría • 0 MB RAM en segundo plano.",
     default_banner_user: "Listo — Modo Usuario Estándar • Cero Telemetría. Pulsa 'Elevar UAC' para limpieza profunda.",
+    btn_select_all: "Seleccionar Todos",
+    btn_deselect_all: "Deseleccionar Todos",
+    lbl_search_filter: "Buscar...",
+    badge_admin_required: "Admin Requerido",
 
     sidebar_sec_maintenance: "MANTENIMIENTO Y LIMPIEZA",
     sidebar_sec_premium: "FUNCIONES PREMIUM GRATIS",
@@ -1063,6 +1148,7 @@ pub static STRINGS_ES: Strings = Strings {
     wiper_full_free_badge: "100% Espacio Libre (-512 MB margen SO)",
     btn_start_wipe: "Iniciar Borrado de Espacio Libre",
     btn_stop_wipe: "Detener Ahora y Liberar Espacio",
+    wiper_safety_note: "Seguridad garantizada: RustCleaner solo sobrescribe el espacio libre no asignado. Sus archivos personales, aplicaciones y Windows permanecen intactos.",
 
     soft_title: "Software Updater (Microsoft Winget Nativo)",
     soft_subtitle: "Sin bases de datos propietarias: consulta directamente el gestor oficial Windows Package Manager.",
@@ -1136,6 +1222,10 @@ pub static STRINGS_DE: Strings = Strings {
     status_running: "LÄUFT",
     default_banner_admin: "Bereit — Administratorrechte (UAC) aktiv • Null Telemetrie • 0 MB Hintergrund-RAM.",
     default_banner_user: "Bereit — Standard-Benutzermodus • Null Telemetrie. Klicken Sie auf 'UAC erhöhen' für Systemzugriff.",
+    btn_select_all: "Alle Auswählen",
+    btn_deselect_all: "Alle Abwählen",
+    lbl_search_filter: "Suchen...",
+    badge_admin_required: "Admin Erforderlich",
 
     sidebar_sec_maintenance: "WARTUNG & REINIGUNG",
     sidebar_sec_premium: "KOSTENLOSE PREMIUM-MODULE",
@@ -1235,6 +1325,7 @@ pub static STRINGS_DE: Strings = Strings {
     wiper_full_free_badge: "100% Freier Speicher (-512 MB OS-Reserve)",
     btn_start_wipe: "Speicherbereinigung starten",
     btn_stop_wipe: "Sofort abbrechen & Speicher freigeben",
+    wiper_safety_note: "Sicherheit garantiert: RustCleaner überschreibt ausschließlich nicht zugewiesenen freien Speicherplatz. Ihre persönlichen Dateien, Programme und Windows bleiben unberührt.",
 
     soft_title: "Software-Updater (Natives Microsoft Winget)",
     soft_subtitle: "Keine proprietäre Datenbank: fragt direkt den offiziellen Windows Package Manager ab (winget upgrade).",
@@ -1308,6 +1399,10 @@ pub static STRINGS_ZH: Strings = Strings {
     status_running: "运行中",
     default_banner_admin: "就绪 — 管理员权限 (UAC) 已激活 • 100% 零遥测 • 0 MB 后台内存占用。",
     default_banner_user: "就绪 — 标准用户模式 • 零遥测。点击“提升 UAC”以获取完整系统清理权限。",
+    btn_select_all: "全选",
+    btn_deselect_all: "取消全选",
+    lbl_search_filter: "搜索...",
+    badge_admin_required: "需要管理员权限",
 
     sidebar_sec_maintenance: "系统维护与清理",
     sidebar_sec_premium: "免费高级原生模块",
@@ -1407,6 +1502,7 @@ pub static STRINGS_ZH: Strings = Strings {
     wiper_full_free_badge: "100% 可用空间 (保留 512 MB 系统余量)",
     btn_start_wipe: "开始擦除可用空间",
     btn_stop_wipe: "立即中止并释放空间",
+    wiper_safety_note: "安全保证：RustCleaner 仅覆写未分配的空闲磁盘空间。您的个人文件、应用程序和 Windows 系统文件绝对不会被删除或修改。",
 
     soft_title: "软件更新器 (原生 Microsoft Winget)",
     soft_subtitle: "无第三方私有数据库：直接调用官方 Windows 软件包管理器 (winget upgrade)。",
@@ -1480,6 +1576,10 @@ pub static STRINGS_PT: Strings = Strings {
     status_running: "EM EXECUÇÃO",
     default_banner_admin: "Pronto — Privilégios de Administrador (UAC) ativos • Zero Telemetria • 0 MB RAM em segundo plano.",
     default_banner_user: "Pronto — Modo Usuário Padrão • Zero Telemetria. Clique em 'Elevar UAC' para limpeza profunda.",
+    btn_select_all: "Selecionar Todos",
+    btn_deselect_all: "Desmarcar Todos",
+    lbl_search_filter: "Pesquisar...",
+    badge_admin_required: "Admin Necessário",
 
     sidebar_sec_maintenance: "MANUTENÇÃO E LIMPEZA",
     sidebar_sec_premium: "FUNÇÕES PREMIUM GRATUITAS",
@@ -1579,6 +1679,7 @@ pub static STRINGS_PT: Strings = Strings {
     wiper_full_free_badge: "100% Espaço Livre (-512 MB margem SO)",
     btn_start_wipe: "Iniciar Limpeza do Espaço Livre",
     btn_stop_wipe: "Interromper Agora e Liberar Espaço",
+    wiper_safety_note: "Segurança garantida: RustCleaner sobrescreve apenas o espaço livre não alocado. Seus arquivos pessoais, aplicativos e o Windows permanecem totalmente intocados.",
 
     soft_title: "Software Updater (Microsoft Winget Nativo)",
     soft_subtitle: "Sem banco de dados proprietário: consulta diretamente o gerenciador oficial Windows Package Manager.",
@@ -1654,6 +1755,11 @@ mod tests {
             assert!(!s.soft_title.is_empty());
             assert!(!s.drv_title.is_empty());
             assert!(!s.auto_title.is_empty());
+            assert!(!s.btn_select_all.is_empty());
+            assert!(!s.btn_deselect_all.is_empty());
+            assert!(!s.lbl_search_filter.is_empty());
+            assert!(!s.badge_admin_required.is_empty());
+            assert!(!s.wiper_safety_note.is_empty());
         }
     }
 
@@ -1672,6 +1778,17 @@ mod tests {
                     rule.id,
                     lang
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn test_all_reg_categories_localized_in_all_languages() {
+        for &lang in Language::all() {
+            for &cat in RegistryCategory::all() {
+                let (title, desc) = lang.localize_reg_category(cat);
+                assert!(!title.is_empty());
+                assert!(!desc.is_empty());
             }
         }
     }

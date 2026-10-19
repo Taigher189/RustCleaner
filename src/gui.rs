@@ -10,7 +10,7 @@
 
 use crate::cleaner::{
     analyze_all, default_clean_rules, execute_clean, format_bytes, CleanRule, CleanSummary,
-    RuleGroup,
+    RuleGroup, ScannedFileItem,
 };
 use crate::driver_updater::{install_wu_driver_updates, scan_drivers, DriverScanReport};
 use crate::i18n::Language;
@@ -176,10 +176,12 @@ pub struct RustCleanerApp {
     pub cleaner_busy: bool,
     pub cleaner_result_rx: Arc<Mutex<Option<(CleanSummary, bool)>>>,
     pub selected_rule_group_filter: Option<RuleGroup>,
+    pub cleaner_search_query: String,
 
     // 2. Registry State
     pub reg_categories: Vec<(RegistryCategory, bool)>,
     pub reg_issues: Vec<RegistryIssue>,
+    pub reg_filter: String,
     pub reg_backup_dir: PathBuf,
     pub reg_last_backup: Option<PathBuf>,
 
@@ -249,11 +251,13 @@ impl Default for RustCleanerApp {
             cleaner_busy: false,
             cleaner_result_rx: Arc::new(Mutex::new(None)),
             selected_rule_group_filter: None,
+            cleaner_search_query: String::new(),
             reg_categories: RegistryCategory::all()
                 .iter()
                 .map(|&c| (c, true))
                 .collect(),
             reg_issues: Vec::new(),
+            reg_filter: String::new(),
             reg_backup_dir: backup_dir,
             reg_last_backup: None,
             startup_entries: list_startup_entries(),
@@ -340,26 +344,26 @@ fn apply_pro_max_theme(ctx: &egui::Context, mode: ThemeMode) {
 
     visuals.widgets.noninteractive.bg_fill = pal.bg_card;
     visuals.widgets.noninteractive.weak_bg_fill = pal.bg_card;
-    visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, pal.border_subtle);
-    visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, pal.text_primary);
+    visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, pal.border_subtle);
+    visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, pal.text_primary);
     visuals.widgets.noninteractive.corner_radius = radius;
 
     visuals.widgets.inactive.bg_fill = pal.bg_card_subtle;
     visuals.widgets.inactive.weak_bg_fill = pal.bg_card_subtle;
-    visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, pal.border_subtle);
-    visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, pal.text_primary);
+    visuals.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, pal.border_subtle);
+    visuals.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, pal.text_primary);
     visuals.widgets.inactive.corner_radius = radius;
 
     visuals.widgets.hovered.bg_fill = pal.bg_card_hover;
     visuals.widgets.hovered.weak_bg_fill = pal.bg_card_hover;
-    visuals.widgets.hovered.bg_stroke = Stroke::new(1.5, pal.accent_cyan);
-    visuals.widgets.hovered.fg_stroke = Stroke::new(1.5, pal.text_primary);
+    visuals.widgets.hovered.bg_stroke = Stroke::new(1.5_f32, pal.accent_cyan);
+    visuals.widgets.hovered.fg_stroke = Stroke::new(1.5_f32, pal.text_primary);
     visuals.widgets.hovered.corner_radius = radius;
 
     visuals.widgets.active.bg_fill = pal.accent_rust;
     visuals.widgets.active.weak_bg_fill = pal.accent_rust;
-    visuals.widgets.active.bg_stroke = Stroke::new(1.5, Color32::WHITE);
-    visuals.widgets.active.fg_stroke = Stroke::new(1.5, Color32::WHITE);
+    visuals.widgets.active.bg_stroke = Stroke::new(1.5_f32, Color32::WHITE);
+    visuals.widgets.active.fg_stroke = Stroke::new(1.5_f32, Color32::WHITE);
     visuals.widgets.active.corner_radius = radius;
 
     visuals.selection.bg_fill = Color32::from_rgba_unmultiplied(
@@ -368,7 +372,7 @@ fn apply_pro_max_theme(ctx: &egui::Context, mode: ThemeMode) {
         pal.accent_cyan.b(),
         55,
     );
-    visuals.selection.stroke = Stroke::new(1.5, pal.accent_cyan);
+    visuals.selection.stroke = Stroke::new(1.5_f32, pal.accent_cyan);
 
     style.visuals = visuals;
     style.spacing.item_spacing = egui::vec2(8.0, 8.0);
@@ -383,7 +387,7 @@ fn apply_pro_max_theme(ctx: &egui::Context, mode: ThemeMode) {
 fn paint_vector_icon(painter: &egui::Painter, rect: Rect, icon: VectorIcon, color: Color32) {
     let c = rect.center();
     let r = (rect.width().min(rect.height()) * 0.36).max(4.0);
-    let s = Stroke::new(1.6, color);
+    let s = Stroke::new(1.6_f32, color);
 
     match icon {
         VectorIcon::BrandShield => {
@@ -625,17 +629,17 @@ fn draw_action_button(
             } else {
                 Color32::from_rgb(224, 242, 254)
             },
-            Stroke::new(1.2, pal.accent_cyan),
+            Stroke::new(1.2_f32, pal.accent_cyan),
             pal.accent_cyan,
         ),
         ButtonVariant::ExecuteBrand => (
             pal.accent_rust,
-            Stroke::new(1.0, pal.accent_rust),
+            Stroke::new(1.0_f32, pal.accent_rust),
             Color32::WHITE,
         ),
         ButtonVariant::Secondary => (
             pal.bg_card_subtle,
-            Stroke::new(1.0, pal.border_strong),
+            Stroke::new(1.0_f32, pal.border_strong),
             pal.text_primary,
         ),
         ButtonVariant::Danger => (
@@ -644,7 +648,7 @@ fn draw_action_button(
             } else {
                 Color32::from_rgb(254, 226, 226)
             },
-            Stroke::new(1.2, pal.accent_red),
+            Stroke::new(1.2_f32, pal.accent_red),
             pal.accent_red,
         ),
     };
@@ -658,7 +662,7 @@ fn draw_action_button(
     let stroke = if enabled {
         border_stroke
     } else {
-        Stroke::new(1.0, pal.border_subtle)
+        Stroke::new(1.0_f32, pal.border_subtle)
     };
 
     let mut clicked = false;
@@ -688,7 +692,7 @@ fn draw_action_button(
             ui.painter().rect_stroke(
                 resp.response.rect,
                 CornerRadius::same(8),
-                Stroke::new(1.5, fg),
+                Stroke::new(1.5_f32, fg),
                 egui::StrokeKind::Inside,
             );
         }
@@ -712,7 +716,7 @@ fn draw_kpi_card(
     let avail_w = ui.available_width();
     egui::Frame::new()
         .fill(pal.bg_card)
-        .stroke(Stroke::new(1.0, pal.border_subtle))
+        .stroke(Stroke::new(1.0_f32, pal.border_subtle))
         .corner_radius(CornerRadius::same(10))
         .inner_margin(egui::Margin::symmetric(14, 11))
         .show(ui, |ui| {
@@ -744,7 +748,7 @@ fn draw_pill_badge(ui: &mut egui::Ui, text: &str, bg: Color32, fg: Color32) {
     egui::Frame::new()
         .fill(bg)
         .stroke(Stroke::new(
-            1.0,
+            1.0_f32,
             Color32::from_rgba_unmultiplied(fg.r(), fg.g(), fg.b(), 75),
         ))
         .corner_radius(CornerRadius::same(14))
@@ -760,7 +764,7 @@ fn draw_pill_badge(ui: &mut egui::Ui, text: &str, bg: Color32, fg: Color32) {
 fn card_frame(pal: &ThemePalette) -> egui::Frame {
     egui::Frame::new()
         .fill(pal.bg_card)
-        .stroke(Stroke::new(1.0, pal.border_subtle))
+        .stroke(Stroke::new(1.0_f32, pal.border_subtle))
         .corner_radius(CornerRadius::same(10))
         .inner_margin(egui::Margin::symmetric(14, 12))
 }
@@ -784,7 +788,7 @@ fn draw_empty_state(
                 26,
             ))
             .stroke(Stroke::new(
-                1.0,
+                1.0_f32,
                 Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 90),
             ))
             .corner_radius(CornerRadius::same(24))
@@ -825,9 +829,9 @@ fn draw_sidebar_nav_item(
         pal.bg_card_subtle
     };
     let border = if is_selected {
-        Stroke::new(1.5, accent)
+        Stroke::new(1.5_f32, accent)
     } else {
-        Stroke::new(1.0, pal.border_subtle)
+        Stroke::new(1.0_f32, pal.border_subtle)
     };
 
     let frame_resp = egui::Frame::new()
@@ -1007,7 +1011,7 @@ impl eframe::App for RustCleanerApp {
             .frame(
                 egui::Frame::new()
                     .fill(pal.bg_header)
-                    .stroke(Stroke::new(1.0, pal.border_subtle))
+                    .stroke(Stroke::new(1.0_f32, pal.border_subtle))
                     .inner_margin(egui::Margin::symmetric(18, 10)),
             )
             .show(ctx, |ui| {
@@ -1020,7 +1024,7 @@ impl eframe::App for RustCleanerApp {
                             pal.accent_rust.b(),
                             30,
                         ))
-                        .stroke(Stroke::new(1.5, pal.accent_rust))
+                        .stroke(Stroke::new(1.5_f32, pal.accent_rust))
                         .corner_radius(CornerRadius::same(9))
                         .inner_margin(egui::Margin::same(7))
                         .show(ui, |ui| {
@@ -1046,7 +1050,7 @@ impl eframe::App for RustCleanerApp {
                             );
                             draw_pill_badge(
                                 ui,
-                                "MEGA ALPHA v1.2.0-alpha",
+                                "v1.2.0-alpha",
                                 Color32::from_rgba_unmultiplied(
                                     pal.accent_rust.r(),
                                     pal.accent_rust.g(),
@@ -1143,7 +1147,7 @@ impl eframe::App for RustCleanerApp {
                         // 3. 7-Language Selector (IT, EN, FR, ES, DE, ZH, PT)
                         egui::Frame::new()
                             .fill(pal.bg_card_subtle)
-                            .stroke(Stroke::new(1.0, pal.border_strong))
+                            .stroke(Stroke::new(1.0_f32, pal.border_strong))
                             .corner_radius(CornerRadius::same(8))
                             .inner_margin(egui::Margin::symmetric(8, 4))
                             .show(ui, |ui| {
@@ -1202,7 +1206,7 @@ impl eframe::App for RustCleanerApp {
                             };
                             egui::Frame::new()
                                 .fill(pal.bg_card)
-                                .stroke(Stroke::new(1.0, pal.border_subtle))
+                                .stroke(Stroke::new(1.0_f32, pal.border_subtle))
                                 .corner_radius(CornerRadius::same(8))
                                 .inner_margin(egui::Margin::symmetric(10, 5))
                                 .show(ui, |ui| {
@@ -1252,7 +1256,7 @@ impl eframe::App for RustCleanerApp {
             .frame(
                 egui::Frame::new()
                     .fill(pal.bg_header)
-                    .stroke(Stroke::new(1.0, pal.border_subtle))
+                    .stroke(Stroke::new(1.0_f32, pal.border_subtle))
                     .inner_margin(egui::Margin::symmetric(18, 7)),
             )
             .show(ctx, |ui| {
@@ -1296,7 +1300,7 @@ impl eframe::App for RustCleanerApp {
             .frame(
                 egui::Frame::new()
                     .fill(pal.bg_sidebar)
-                    .stroke(Stroke::new(1.0, pal.border_subtle))
+                    .stroke(Stroke::new(1.0_f32, pal.border_subtle))
                     .inner_margin(egui::Margin::symmetric(12, 12)),
             )
             .show(ctx, |ui| {
@@ -1433,7 +1437,7 @@ impl eframe::App for RustCleanerApp {
                         ui.add_space(6.0);
                         egui::Frame::new()
                             .fill(pal.bg_card)
-                            .stroke(Stroke::new(1.0, pal.border_subtle))
+                            .stroke(Stroke::new(1.0_f32, pal.border_subtle))
                             .corner_radius(CornerRadius::same(9))
                             .inner_margin(egui::Margin::symmetric(10, 8))
                             .show(ui, |ui| {
@@ -1668,20 +1672,33 @@ impl RustCleanerApp {
                             .color(pal.text_primary),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let none_btn = ui.small_button(s.btn_none);
-                        if none_btn.hovered() {
+                        let none_btn = egui::Button::new(
+                            RichText::new(s.btn_none).size(11.0).color(pal.text_secondary),
+                        )
+                        .fill(pal.bg_card_subtle)
+                        .stroke(Stroke::new(1.0_f32, pal.border_subtle))
+                        .corner_radius(CornerRadius::same(12));
+                        let resp_none = ui.add(none_btn);
+                        if resp_none.hovered() {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                         }
-                        if none_btn.clicked() {
+                        if resp_none.clicked() {
                             for r in &mut self.clean_rules {
                                 r.enabled = false;
                             }
                         }
-                        let all_btn = ui.small_button(s.btn_all);
-                        if all_btn.hovered() {
+
+                        let all_btn = egui::Button::new(
+                            RichText::new(s.btn_all).size(11.0).color(pal.text_secondary),
+                        )
+                        .fill(pal.bg_card_subtle)
+                        .stroke(Stroke::new(1.0_f32, pal.border_subtle))
+                        .corner_radius(CornerRadius::same(12));
+                        let resp_all = ui.add(all_btn);
+                        if resp_all.hovered() {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                         }
-                        if all_btn.clicked() {
+                        if resp_all.clicked() {
                             for r in &mut self.clean_rules {
                                 r.enabled = true;
                             }
@@ -1740,7 +1757,7 @@ impl RustCleanerApp {
 
                             egui::Frame::new()
                                 .fill(pal.bg_card_subtle)
-                                .stroke(Stroke::new(1.0, pal.border_subtle))
+                                .stroke(Stroke::new(1.0_f32, pal.border_subtle))
                                 .corner_radius(CornerRadius::same(8))
                                 .inner_margin(egui::Margin::symmetric(10, 7))
                                 .show(ui, |ui| {
@@ -1782,12 +1799,23 @@ impl RustCleanerApp {
 
             card_frame(pal).show(&mut cols[1], |ui| {
                 ui.set_height(remaining_h);
-                ui.label(
-                    RichText::new(s.cleaner_details_hdr)
-                        .size(14.5)
-                        .strong()
-                        .color(pal.text_primary),
-                );
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(s.cleaner_details_hdr)
+                            .size(14.5)
+                            .strong()
+                            .color(pal.text_primary),
+                    );
+                    if self.clean_summary.is_some() {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.cleaner_search_query)
+                                    .hint_text(s.lbl_search_filter)
+                                    .desired_width(170.0),
+                            );
+                        });
+                    }
+                });
                 ui.separator();
 
                 if self.cleaner_busy {
@@ -1823,7 +1851,24 @@ impl RustCleanerApp {
                                 );
                             }
 
+                            let q = self.cleaner_search_query.trim().to_lowercase();
+
                             for res in non_empty {
+                                let matching_files: Vec<&ScannedFileItem> = if q.is_empty() {
+                                    res.files.iter().collect()
+                                } else {
+                                    res.files
+                                        .iter()
+                                        .filter(|f| {
+                                            f.path.to_string_lossy().to_lowercase().contains(&q)
+                                        })
+                                        .collect()
+                                };
+
+                                if !q.is_empty() && matching_files.is_empty() {
+                                    continue;
+                                }
+
                                 let ratio = if summary.total_bytes_found > 0 {
                                     (res.total_bytes as f32 / summary.total_bytes_found as f32)
                                         .clamp(0.0, 1.0)
@@ -1837,7 +1882,7 @@ impl RustCleanerApp {
 
                                 egui::Frame::new()
                                     .fill(pal.bg_card_subtle)
-                                    .stroke(Stroke::new(1.0, pal.border_subtle))
+                                    .stroke(Stroke::new(1.0_f32, pal.border_subtle))
                                     .corner_radius(CornerRadius::same(8))
                                     .inner_margin(egui::Margin::symmetric(10, 7))
                                     .show(ui, |ui| {
@@ -1863,15 +1908,16 @@ impl RustCleanerApp {
                                                         ),
                                                         pal.accent_cyan,
                                                     );
+                                                    let count_label = if q.is_empty() {
+                                                        format!("{} ({})", res.files.len(), res.locked_count)
+                                                    } else {
+                                                        format!("{}/{} ({})", matching_files.len(), res.files.len(), res.locked_count)
+                                                    };
                                                     ui.label(
-                                                        RichText::new(format!(
-                                                            "{} ({})",
-                                                            res.files.len(),
-                                                            res.locked_count
-                                                        ))
-                                                        .size(11.0)
-                                                        .monospace()
-                                                        .color(pal.text_secondary),
+                                                        RichText::new(count_label)
+                                                            .size(11.0)
+                                                            .monospace()
+                                                            .color(pal.text_secondary),
                                                     );
                                                 },
                                             );
@@ -1899,7 +1945,7 @@ impl RustCleanerApp {
                                                 .size(11.0)
                                                 .color(pal.text_muted),
                                             |ui| {
-                                                for f in res.files.iter().take(50) {
+                                                for f in matching_files.iter().take(50) {
                                                     ui.horizontal(|ui| {
                                                         if f.locked_or_denied {
                                                             draw_pill_badge(
@@ -2080,10 +2126,12 @@ impl RustCleanerApp {
                         .color(pal.text_secondary),
                 );
                 for (cat, enabled) in &mut self.reg_categories {
-                    let cb = ui.checkbox(enabled, cat.code());
+                    let (cat_title, cat_desc) = self.language.localize_reg_category(*cat);
+                    let cb = ui.checkbox(enabled, cat_title);
                     if cb.hovered() {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                     }
+                    cb.on_hover_text(format!("{} [{}]", cat_desc, cat.code()));
                 }
             });
             if let Some(last_bak) = &self.reg_last_backup {
@@ -2101,9 +2149,72 @@ impl RustCleanerApp {
             }
         });
 
-        ui.add_space(8.0);
+        ui.add_space(6.0);
+
+        if !self.reg_issues.is_empty() {
+            card_frame(pal).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    let selected_count = self.reg_issues.iter().filter(|i| i.selected).count();
+                    draw_pill_badge(
+                        ui,
+                        &format!("{}/{}", selected_count, self.reg_issues.len()),
+                        Color32::from_rgba_unmultiplied(
+                            pal.accent_amber.r(),
+                            pal.accent_amber.g(),
+                            pal.accent_amber.b(),
+                            32,
+                        ),
+                        pal.accent_amber,
+                    );
+
+                    let all_btn = egui::Button::new(
+                        RichText::new(s.btn_select_all).size(11.0).color(pal.text_secondary),
+                    )
+                    .fill(pal.bg_card_subtle)
+                    .stroke(Stroke::new(1.0_f32, pal.border_subtle))
+                    .corner_radius(CornerRadius::same(12));
+                    let resp_all = ui.add(all_btn);
+                    if resp_all.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
+                    if resp_all.clicked() {
+                        for issue in &mut self.reg_issues {
+                            issue.selected = true;
+                        }
+                    }
+
+                    let none_btn = egui::Button::new(
+                        RichText::new(s.btn_deselect_all).size(11.0).color(pal.text_secondary),
+                    )
+                    .fill(pal.bg_card_subtle)
+                    .stroke(Stroke::new(1.0_f32, pal.border_subtle))
+                    .corner_radius(CornerRadius::same(12));
+                    let resp_none = ui.add(none_btn);
+                    if resp_none.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
+                    if resp_none.clicked() {
+                        for issue in &mut self.reg_issues {
+                            issue.selected = false;
+                        }
+                    }
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.reg_filter)
+                                .hint_text(s.lbl_search_filter)
+                                .desired_width(220.0),
+                        );
+                    });
+                });
+            });
+            ui.add_space(6.0);
+        }
 
         let list_h = (ui.available_height() - 10.0).max(220.0);
+        let q_reg = self.reg_filter.trim().to_lowercase();
+
         card_frame(pal).show(ui, |ui| {
             ui.set_height(list_h);
             egui::ScrollArea::vertical()
@@ -2121,9 +2232,20 @@ impl RustCleanerApp {
                         );
                     } else {
                         for issue in &mut self.reg_issues {
+                            if !q_reg.is_empty()
+                                && !issue.problem_description.to_lowercase().contains(&q_reg)
+                                && !issue.data_reference.to_lowercase().contains(&q_reg)
+                                && !issue.key_path.to_lowercase().contains(&q_reg)
+                                && !issue.category.code().to_lowercase().contains(&q_reg)
+                            {
+                                continue;
+                            }
+
+                            let (cat_title, _) = self.language.localize_reg_category(issue.category);
+
                             egui::Frame::new()
                                 .fill(pal.bg_card_subtle)
-                                .stroke(Stroke::new(1.0, pal.border_subtle))
+                                .stroke(Stroke::new(1.0_f32, pal.border_subtle))
                                 .corner_radius(CornerRadius::same(8))
                                 .inner_margin(egui::Margin::symmetric(12, 8))
                                 .show(ui, |ui| {
@@ -2144,6 +2266,17 @@ impl RustCleanerApp {
                                                 32,
                                             ),
                                             pal.accent_rust,
+                                        );
+                                        draw_pill_badge(
+                                            ui,
+                                            cat_title,
+                                            Color32::from_rgba_unmultiplied(
+                                                pal.accent_cyan.r(),
+                                                pal.accent_cyan.g(),
+                                                pal.accent_cyan.b(),
+                                                24,
+                                            ),
+                                            pal.accent_cyan,
                                         );
                                         ui.label(
                                             RichText::new(&issue.problem_description)
@@ -2281,7 +2414,7 @@ impl RustCleanerApp {
                         ui.push_id(row_idx, |ui| {
                             egui::Frame::new()
                                 .fill(pal.bg_card_subtle)
-                                .stroke(Stroke::new(1.0, pal.border_subtle))
+                                .stroke(Stroke::new(1.0_f32, pal.border_subtle))
                                 .corner_radius(CornerRadius::same(8))
                                 .inner_margin(egui::Margin::symmetric(12, 9))
                                 .show(ui, |ui| {
@@ -2312,6 +2445,21 @@ impl RustCleanerApp {
                                                 pal.accent_amber,
                                             );
                                         }
+                                        let req_admin = entry.source.requires_admin() && !self.is_admin;
+                                        if req_admin {
+                                            draw_pill_badge(
+                                                ui,
+                                                s.badge_admin_required,
+                                                Color32::from_rgba_unmultiplied(
+                                                    pal.accent_amber.r(),
+                                                    pal.accent_amber.g(),
+                                                    pal.accent_amber.b(),
+                                                    32,
+                                                ),
+                                                pal.accent_amber,
+                                            );
+                                        }
+
                                         draw_pill_badge(
                                             ui,
                                             entry.source.key_label(),
@@ -2339,7 +2487,7 @@ impl RustCleanerApp {
                                                     s.btn_delete,
                                                     VectorIcon::TrashDelete,
                                                     ButtonVariant::Danger,
-                                                    true,
+                                                    !req_admin,
                                                 ) {
                                                     delete_req = Some(entry.clone());
                                                 }
@@ -2354,7 +2502,7 @@ impl RustCleanerApp {
                                                     toggle_label,
                                                     VectorIcon::StartupBolt,
                                                     variant,
-                                                    true,
+                                                    !req_admin,
                                                 ) {
                                                     toggle_req =
                                                         Some((entry.clone(), !entry.enabled));
@@ -2488,7 +2636,7 @@ impl RustCleanerApp {
                         ui.push_id(row_idx, |ui| {
                             egui::Frame::new()
                                 .fill(pal.bg_card_subtle)
-                                .stroke(Stroke::new(1.0, pal.border_subtle))
+                                .stroke(Stroke::new(1.0_f32, pal.border_subtle))
                                 .corner_radius(CornerRadius::same(8))
                                 .inner_margin(egui::Margin::symmetric(12, 9))
                                 .show(ui, |ui| {
@@ -2608,7 +2756,28 @@ impl RustCleanerApp {
                 .size(12.0)
                 .color(pal.text_secondary),
         );
-        ui.add_space(10.0);
+        ui.add_space(8.0);
+
+        card_frame(pal).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                let (icon_rect, _) =
+                    ui.allocate_exact_size(egui::vec2(18.0, 18.0), Sense::hover());
+                paint_vector_icon(
+                    ui.painter(),
+                    icon_rect,
+                    VectorIcon::CheckShield,
+                    pal.accent_emerald,
+                );
+                ui.label(
+                    RichText::new(s.wiper_safety_note)
+                        .size(12.0)
+                        .color(pal.text_secondary),
+                );
+            });
+        });
+
+        ui.add_space(8.0);
 
         ui.columns(2, |cols| {
             card_frame(pal).show(&mut cols[0], |ui| {
@@ -2636,7 +2805,7 @@ impl RustCleanerApp {
                             pal.bg_card_subtle
                         })
                         .stroke(Stroke::new(
-                            1.2,
+                            1.2_f32,
                             if is_sel {
                                 pal.accent_cyan
                             } else {
@@ -2736,7 +2905,7 @@ impl RustCleanerApp {
                             pal.bg_card_subtle
                         })
                         .stroke(Stroke::new(
-                            1.2,
+                            1.2_f32,
                             if is_sel {
                                 pal.accent_rust
                             } else {
@@ -3043,7 +3212,7 @@ impl RustCleanerApp {
                                 ui.push_id(row_idx, |ui| {
                                     egui::Frame::new()
                                         .fill(pal.bg_card_subtle)
-                                        .stroke(Stroke::new(1.0, pal.border_subtle))
+                                        .stroke(Stroke::new(1.0_f32, pal.border_subtle))
                                         .corner_radius(CornerRadius::same(8))
                                         .inner_margin(egui::Margin::symmetric(12, 9))
                                         .show(ui, |ui| {
@@ -3309,7 +3478,7 @@ impl RustCleanerApp {
                             for wu in &rep.wu_pending_drivers {
                                 egui::Frame::new()
                                     .fill(pal.bg_card_subtle)
-                                    .stroke(Stroke::new(1.2, pal.accent_amber))
+                                    .stroke(Stroke::new(1.2_f32, pal.accent_amber))
                                     .corner_radius(CornerRadius::same(8))
                                     .inner_margin(egui::Margin::symmetric(12, 8))
                                     .show(ui, |ui| {
@@ -3379,7 +3548,7 @@ impl RustCleanerApp {
                             }
                             egui::Frame::new()
                                 .fill(pal.bg_card_subtle)
-                                .stroke(Stroke::new(1.0, pal.border_subtle))
+                                .stroke(Stroke::new(1.0_f32, pal.border_subtle))
                                 .corner_radius(CornerRadius::same(8))
                                 .inner_margin(egui::Margin::symmetric(12, 8))
                                 .show(ui, |ui| {
@@ -3491,7 +3660,7 @@ impl RustCleanerApp {
 
                 egui::Frame::new()
                     .fill(pal.bg_card_subtle)
-                    .stroke(Stroke::new(1.0, pal.border_subtle))
+                    .stroke(Stroke::new(1.0_f32, pal.border_subtle))
                     .corner_radius(CornerRadius::same(8))
                     .inner_margin(egui::Margin::symmetric(12, 8))
                     .show(ui, |ui| {
