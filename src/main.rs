@@ -4,6 +4,7 @@
 //! Supports both a modern Obsidian Desktop GUI (`eframe`/`egui`) and full CLI subcommands (`clap`).
 
 pub mod cleaner;
+pub mod disk_analyzer;
 pub mod driver_updater;
 pub mod gui;
 pub mod i18n;
@@ -23,7 +24,7 @@ use std::sync::{Arc, Mutex};
 #[derive(Parser)]
 #[command(
     name = "rustcleaner",
-    version = "1.3.0-alpha",
+    version = "1.4.0-alpha",
     about = "[MEGA ALPHA] Utility di pulizia, aggiornamento e ottimizzazione per Windows scritta in Rust (Zero Telemetria, 0 MB RAM in background)"
 )]
 struct Cli {
@@ -136,7 +137,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 viewport: eframe::egui::ViewportBuilder::default()
                     .with_inner_size([1220.0, 750.0])
                     .with_min_inner_size([1020.0, 640.0])
-                    .with_title("RustCleaner v1.3.0-alpha [MEGA ALPHA] — Zero-Telemetry Windows Optimizer"),
+                    .with_title("RustCleaner v1.4.0-alpha [MEGA ALPHA] — Zero-Telemetry Windows Optimizer"),
                 ..Default::default()
             };
             eframe::run_native(

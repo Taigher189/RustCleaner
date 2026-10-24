@@ -12,6 +12,10 @@ use crate::cleaner::{
     analyze_all, default_clean_rules, execute_clean, format_bytes, CleanRule, CleanSummary,
     RuleGroup, ScannedFileItem,
 };
+use crate::disk_analyzer::{
+    delete_analyzed_file, resolve_preset_paths, reveal_in_explorer, run_disk_analysis,
+    DiskAnalysisReport, FileCategory, ScanTargetPreset,
+};
 use crate::driver_updater::{install_wu_driver_updates, scan_drivers, DriverScanReport};
 use crate::i18n::Language;
 use crate::monitor::{start_realtime_watcher, RealtimeMonitorState};
@@ -122,6 +126,7 @@ impl ThemePalette {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveTab {
     Cleaner,
+    DiskAnalyzer,
     Registry,
     Startup,
     Uninstaller,
@@ -132,9 +137,18 @@ pub enum ActiveTab {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiskSubView {
+    Duplicates,
+    LargeFiles,
+    Categories,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum VectorIcon {
     BrandShield,
     CleanerSweep,
+    DiskRadar,
+    FolderOpen,
     RegistryGrid,
     StartupBolt,
     UninstallerBox,
@@ -222,6 +236,18 @@ pub struct RustCleanerApp {
     pub schedule_logs: Vec<String>,
     pub monitor_state: Arc<Mutex<RealtimeMonitorState>>,
     pub monitor_stop_flag: Arc<AtomicBool>,
+
+    // 8. Disk Analyzer & SHA-256 Duplicate Finder State
+    pub disk_preset: ScanTargetPreset,
+    pub disk_custom_path: String,
+    pub disk_min_large_mb: u64,
+    pub disk_min_dup_kb: u64,
+    pub disk_subview: DiskSubView,
+    pub disk_search_filter: String,
+    pub disk_busy: bool,
+    pub disk_cancel: Arc<AtomicBool>,
+    pub disk_report: Option<DiskAnalysisReport>,
+    pub disk_rx: Arc<Mutex<Option<DiskAnalysisReport>>>,
 }
 
 impl Default for RustCleanerApp {
@@ -288,6 +314,16 @@ impl Default for RustCleanerApp {
             schedule_logs: read_scheduled_logs(),
             monitor_state: Arc::new(Mutex::new(RealtimeMonitorState::default())),
             monitor_stop_flag: Arc::new(AtomicBool::new(false)),
+            disk_preset: ScanTargetPreset::UserProfileMediaAndDocs,
+            disk_custom_path: env::var("USERPROFILE").unwrap_or_else(|_| r"C:\".to_string()),
+            disk_min_large_mb: 50,
+            disk_min_dup_kb: 256,
+            disk_subview: DiskSubView::Duplicates,
+            disk_search_filter: String::new(),
+            disk_busy: false,
+            disk_cancel: Arc::new(AtomicBool::new(false)),
+            disk_report: None,
+            disk_rx: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -607,6 +643,29 @@ fn paint_vector_icon(painter: &egui::Painter, rect: Rect, icon: VectorIcon, colo
             );
             painter.line_segment(
                 [Pos2::new(c.x, c.y - r * 0.88), Pos2::new(c.x, c.y + r * 0.88)],
+                s,
+            );
+        }
+        VectorIcon::DiskRadar => {
+            painter.circle_stroke(c, r * 0.9, s);
+            painter.circle_stroke(c, r * 0.45, s);
+            painter.line_segment(
+                [c, Pos2::new(c.x + r * 0.64, c.y - r * 0.64)],
+                s,
+            );
+            painter.circle_filled(c, 1.8, color);
+        }
+        VectorIcon::FolderOpen => {
+            let folder = Rect::from_min_max(
+                Pos2::new(c.x - r * 0.85, c.y - r * 0.45),
+                Pos2::new(c.x + r * 0.85, c.y + r * 0.72),
+            );
+            painter.rect_stroke(folder, CornerRadius::same(2), s, egui::StrokeKind::Inside);
+            painter.line_segment(
+                [
+                    Pos2::new(folder.left(), folder.top() - r * 0.25),
+                    Pos2::new(c.x - r * 0.1, folder.top() - r * 0.25),
+                ],
                 s,
             );
         }
@@ -986,6 +1045,15 @@ impl eframe::App for RustCleanerApp {
             }
         }
 
+        // Poll background Disk Analyzer & Duplicate Finder results
+        if let Ok(mut guard) = self.disk_rx.lock() {
+            if let Some(rep) = guard.take() {
+                self.disk_busy = false;
+                self.status_banner = rep.status_message.clone();
+                self.disk_report = Some(rep);
+            }
+        }
+
         let wiper_running = self
             .wipe_progress
             .lock()
@@ -998,6 +1066,7 @@ impl eframe::App for RustCleanerApp {
             .unwrap_or(false);
 
         if self.cleaner_busy
+            || self.disk_busy
             || wiper_running
             || self.winget_busy
             || self.driver_busy
@@ -1050,7 +1119,7 @@ impl eframe::App for RustCleanerApp {
                             );
                             draw_pill_badge(
                                 ui,
-                                "v1.3.0-alpha",
+                                "v1.4.0-alpha",
                                 Color32::from_rgba_unmultiplied(
                                     pal.accent_rust.r(),
                                     pal.accent_rust.g(),
@@ -1262,6 +1331,7 @@ impl eframe::App for RustCleanerApp {
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     let is_busy = self.cleaner_busy
+                        || self.disk_busy
                         || wiper_running
                         || self.winget_busy
                         || self.driver_busy;
@@ -1326,6 +1396,13 @@ impl eframe::App for RustCleanerApp {
                             Some(self.reg_issues.len())
                         };
 
+                        let ds = self.language.disk_analyzer();
+                        let disk_dup_cnt = self
+                            .disk_report
+                            .as_ref()
+                            .map(|r| r.duplicate_groups.len())
+                            .filter(|&c| c > 0);
+
                         let nav_items = [
                             (
                                 ActiveTab::Cleaner,
@@ -1334,6 +1411,14 @@ impl eframe::App for RustCleanerApp {
                                 s.nav_cleaner_title,
                                 s.nav_cleaner_sub,
                                 None,
+                            ),
+                            (
+                                ActiveTab::DiskAnalyzer,
+                                VectorIcon::DiskRadar,
+                                pal.accent_cyan,
+                                ds.nav_title,
+                                ds.nav_sub,
+                                disk_dup_cnt,
                             ),
                             (
                                 ActiveTab::Registry,
@@ -1396,7 +1481,7 @@ impl eframe::App for RustCleanerApp {
                         for (idx, (tab, icon, color, title, subtitle, badge_cnt)) in
                             nav_items.iter().enumerate()
                         {
-                            if idx == 5 {
+                            if idx == 6 {
                                 ui.add_space(6.0);
                                 ui.label(
                                     RichText::new(s.sidebar_sec_premium)
@@ -1476,6 +1561,7 @@ impl eframe::App for RustCleanerApp {
             )
             .show(ctx, |ui| match self.active_tab {
                 ActiveTab::Cleaner => self.render_cleaner_tab(ui, &pal),
+                ActiveTab::DiskAnalyzer => self.render_disk_analyzer_tab(ui, &pal),
                 ActiveTab::Registry => self.render_registry_tab(ui, &pal),
                 ActiveTab::Startup => self.render_startup_tab(ui, &pal),
                 ActiveTab::Uninstaller => self.render_uninstaller_tab(ui, &pal),
@@ -3995,5 +4081,825 @@ impl RustCleanerApp {
                     });
             });
         });
+    }
+
+    // === 9. DISK SPACE ANALYZER, LARGE FILES & SHA-256 DUPLICATE FINDER TAB ===
+    fn start_disk_analysis(&mut self) {
+        let ds = self.language.disk_analyzer();
+        self.disk_busy = true;
+        self.disk_cancel.store(false, Ordering::Relaxed);
+        self.status_banner = ds.scanning_msg.to_string();
+
+        let roots = resolve_preset_paths(self.disk_preset, &self.disk_custom_path);
+        let min_large_mb = self.disk_min_large_mb;
+        let min_dup_kb = self.disk_min_dup_kb;
+        let cancel_arc = Arc::clone(&self.disk_cancel);
+        let rx_arc = Arc::clone(&self.disk_rx);
+
+        thread::spawn(move || {
+            let report = run_disk_analysis(&roots, min_large_mb, min_dup_kb, cancel_arc);
+            if let Ok(mut guard) = rx_arc.lock() {
+                *guard = Some(report);
+            }
+        });
+    }
+
+    fn render_disk_analyzer_tab(&mut self, ui: &mut egui::Ui, pal: &ThemePalette) {
+        let s = self.language.strings();
+        let ds = self.language.disk_analyzer();
+        let current_lang = self.language;
+
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.label(
+                    RichText::new(ds.page_title)
+                        .size(19.0)
+                        .strong()
+                        .color(pal.text_primary),
+                );
+                ui.label(
+                    RichText::new(ds.page_subtitle)
+                        .size(12.0)
+                        .color(pal.text_secondary),
+                );
+            });
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if self.disk_busy
+                    && draw_action_button(
+                        ui,
+                        pal,
+                        ds.btn_stop_scan,
+                        VectorIcon::StopOctagon,
+                        ButtonVariant::Danger,
+                        true,
+                    )
+                {
+                    self.disk_cancel.store(true, Ordering::Relaxed);
+                }
+
+                if draw_action_button(
+                    ui,
+                    pal,
+                    ds.btn_start_scan,
+                    VectorIcon::DiskRadar,
+                    ButtonVariant::PrimaryScan,
+                    !self.disk_busy,
+                ) {
+                    self.start_disk_analysis();
+                }
+            });
+        });
+
+        ui.add_space(6.0);
+
+        let (scanned_bytes_str, scanned_files_str, large_cnt_str, dup_wasted_str, dup_sub_str) =
+            if let Some(rep) = &self.disk_report {
+                (
+                    format_bytes(rep.total_bytes_scanned),
+                    format!("{} files", rep.total_files_scanned),
+                    format!("{}", rep.large_files.len()),
+                    format_bytes(rep.total_duplicate_wasted_bytes),
+                    format!(
+                        "{} groups • {} copies",
+                        rep.duplicate_groups.len(),
+                        rep.total_duplicate_extra_files
+                    ),
+                )
+            } else {
+                (
+                    "—".to_string(),
+                    s.kpi_waiting_scan.to_string(),
+                    "—".to_string(),
+                    "—".to_string(),
+                    ds.kpi_dup_groups_sub.to_string(),
+                )
+            };
+
+        ui.columns(3, |cols| {
+            draw_kpi_card(
+                &mut cols[0],
+                pal,
+                ds.kpi_scanned_space,
+                &scanned_bytes_str,
+                &scanned_files_str,
+                pal.accent_cyan,
+                VectorIcon::DiskRadar,
+            );
+            draw_kpi_card(
+                &mut cols[1],
+                pal,
+                ds.kpi_large_files,
+                &large_cnt_str,
+                ds.kpi_large_sub,
+                pal.accent_amber,
+                VectorIcon::DriveCylinder,
+            );
+            draw_kpi_card(
+                &mut cols[2],
+                pal,
+                ds.kpi_dup_wasted,
+                &dup_wasted_str,
+                &dup_sub_str,
+                pal.accent_rust,
+                VectorIcon::CleanerSweep,
+            );
+        });
+
+        ui.add_space(6.0);
+
+        // Configuration & Target Bar
+        card_frame(pal).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    RichText::new(ds.lbl_target_preset)
+                        .size(12.0)
+                        .strong()
+                        .color(pal.text_secondary),
+                );
+                let presets = [
+                    ScanTargetPreset::UserProfileMediaAndDocs,
+                    ScanTargetPreset::DownloadsFolder,
+                    ScanTargetPreset::DocumentsAndDesktop,
+                    ScanTargetPreset::SystemDriveRoot,
+                    ScanTargetPreset::CustomPath,
+                ];
+                egui::ComboBox::from_id_salt("disk_preset_combo")
+                    .selected_text(
+                        RichText::new(current_lang.localize_scan_preset(self.disk_preset))
+                            .size(12.0)
+                            .strong()
+                            .color(pal.text_primary),
+                    )
+                    .width(310.0)
+                    .show_ui(ui, |ui| {
+                        for &p in &presets {
+                            ui.selectable_value(
+                                &mut self.disk_preset,
+                                p,
+                                current_lang.localize_scan_preset(p),
+                            );
+                        }
+                    });
+
+                if self.disk_preset == ScanTargetPreset::CustomPath {
+                    ui.label(RichText::new(ds.lbl_custom_path).color(pal.text_secondary));
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.disk_custom_path)
+                            .desired_width(200.0),
+                    );
+                }
+
+                ui.separator();
+                ui.label(
+                    RichText::new(ds.lbl_min_large_mb)
+                        .size(11.5)
+                        .color(pal.text_secondary),
+                );
+                ui.add(
+                    egui::DragValue::new(&mut self.disk_min_large_mb)
+                        .range(5..=10240)
+                        .suffix(" MB"),
+                );
+
+                ui.separator();
+                ui.label(
+                    RichText::new(ds.lbl_min_dup_kb)
+                        .size(11.5)
+                        .color(pal.text_secondary),
+                );
+                ui.add(
+                    egui::DragValue::new(&mut self.disk_min_dup_kb)
+                        .range(1..=1048576)
+                        .suffix(" KB"),
+                );
+            });
+        });
+
+        ui.add_space(6.0);
+
+        // Sub-view switcher + Search filter + Duplicate batch actions
+        let mut trigger_auto_select_dups = false;
+        let mut trigger_delete_selected_dups = false;
+
+        card_frame(pal).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal_wrapped(|ui| {
+                let (dup_cnt, large_cnt) = self
+                    .disk_report
+                    .as_ref()
+                    .map(|r| (r.duplicate_groups.len(), r.large_files.len()))
+                    .unwrap_or((0, 0));
+
+                let views = [
+                    (
+                        DiskSubView::Duplicates,
+                        format!("{} ({dup_cnt})", ds.subview_duplicates),
+                        pal.accent_rust,
+                    ),
+                    (
+                        DiskSubView::LargeFiles,
+                        format!("{} ({large_cnt})", ds.subview_large_files),
+                        pal.accent_amber,
+                    ),
+                    (
+                        DiskSubView::Categories,
+                        ds.subview_categories.to_string(),
+                        pal.accent_cyan,
+                    ),
+                ];
+
+                for (sv, label, accent) in views {
+                    let active = self.disk_subview == sv;
+                    let btn = egui::Button::new(
+                        RichText::new(&label)
+                            .size(12.0)
+                            .strong()
+                            .color(if active {
+                                Color32::WHITE
+                            } else {
+                                pal.text_secondary
+                            }),
+                    )
+                    .fill(if active { accent } else { pal.bg_card_subtle })
+                    .stroke(Stroke::new(
+                        1.0_f32,
+                        if active { accent } else { pal.border_subtle },
+                    ))
+                    .corner_radius(CornerRadius::same(14));
+
+                    let resp = ui.add(btn);
+                    if resp.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
+                    if resp.clicked() {
+                        self.disk_subview = sv;
+                    }
+                }
+
+                ui.separator();
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.disk_search_filter)
+                        .hint_text(s.lbl_search_filter)
+                        .desired_width(180.0),
+                );
+
+                if self.disk_subview == DiskSubView::Duplicates && self.disk_report.is_some() {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let any_selected = self
+                            .disk_report
+                            .as_ref()
+                            .map(|r| {
+                                r.duplicate_groups
+                                    .iter()
+                                    .any(|g| g.files.iter().any(|f| f.selected_for_deletion))
+                            })
+                            .unwrap_or(false);
+
+                        if draw_action_button(
+                            ui,
+                            pal,
+                            ds.btn_delete_selected_dups,
+                            VectorIcon::TrashDelete,
+                            ButtonVariant::Danger,
+                            any_selected,
+                        ) {
+                            trigger_delete_selected_dups = true;
+                        }
+
+                        if draw_action_button(
+                            ui,
+                            pal,
+                            ds.btn_auto_select_dups,
+                            VectorIcon::CheckShield,
+                            ButtonVariant::Secondary,
+                            true,
+                        ) {
+                            trigger_auto_select_dups = true;
+                        }
+                    });
+                }
+            });
+        });
+
+        if trigger_auto_select_dups {
+            if let Some(rep) = &mut self.disk_report {
+                for grp in &mut rep.duplicate_groups {
+                    for (idx, item) in grp.files.iter_mut().enumerate() {
+                        item.selected_for_deletion = idx > 0;
+                    }
+                }
+            }
+        }
+
+        if trigger_delete_selected_dups {
+            let mut deleted_count = 0usize;
+            let mut freed_bytes = 0u64;
+            if let Some(rep) = &mut self.disk_report {
+                for grp in &mut rep.duplicate_groups {
+                    let each_sz = grp.each_size_bytes;
+                    grp.files.retain(|item| {
+                        if item.selected_for_deletion {
+                            if delete_analyzed_file(&item.path).is_ok() {
+                                deleted_count += 1;
+                                freed_bytes = freed_bytes.saturating_add(each_sz);
+                                return false;
+                            }
+                        }
+                        true
+                    });
+                    let extra = grp.files.len().saturating_sub(1) as u64;
+                    grp.wasted_bytes = each_sz.saturating_mul(extra);
+                }
+                rep.duplicate_groups.retain(|g| g.files.len() >= 2);
+                rep.total_duplicate_wasted_bytes =
+                    rep.duplicate_groups.iter().map(|g| g.wasted_bytes).sum();
+                rep.total_duplicate_extra_files = rep
+                    .duplicate_groups
+                    .iter()
+                    .map(|g| g.files.len().saturating_sub(1))
+                    .sum();
+            }
+            self.status_banner = format!(
+                "{}: {} ({})",
+                s.kpi_space_freed,
+                deleted_count,
+                format_bytes(freed_bytes)
+            );
+        }
+
+        ui.add_space(6.0);
+
+        let list_h = (ui.available_height() - 10.0).max(200.0);
+        let filter_low = self.disk_search_filter.trim().to_lowercase();
+        let mut single_large_delete_path: Option<PathBuf> = None;
+
+        card_frame(pal).show(ui, |ui| {
+            ui.set_height(list_h);
+
+            if self.disk_busy {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(65.0);
+                    ui.spinner();
+                    ui.add_space(12.0);
+                    ui.label(
+                        RichText::new(ds.scanning_msg)
+                            .size(14.0)
+                            .color(pal.accent_cyan),
+                    );
+                });
+                return;
+            }
+
+            let Some(rep) = &mut self.disk_report else {
+                draw_empty_state(
+                    ui,
+                    pal,
+                    VectorIcon::DiskRadar,
+                    pal.accent_cyan,
+                    ds.empty_ready_title,
+                    ds.empty_ready_desc,
+                );
+                return;
+            };
+
+            match self.disk_subview {
+                DiskSubView::Duplicates => {
+                    egui::ScrollArea::vertical()
+                        .id_salt("disk_duplicates_scroll")
+                        .max_height((ui.available_height() - 6.0).max(160.0))
+                        .show(ui, |ui| {
+                            if rep.duplicate_groups.is_empty() {
+                                draw_empty_state(
+                                    ui,
+                                    pal,
+                                    VectorIcon::CheckShield,
+                                    pal.accent_emerald,
+                                    ds.empty_no_dups_title,
+                                    ds.empty_no_dups_desc,
+                                );
+                                return;
+                            }
+
+                            for (grp_idx, grp) in rep.duplicate_groups.iter_mut().enumerate() {
+                                if !filter_low.is_empty()
+                                    && !grp.sha256_hex.contains(&filter_low)
+                                    && !grp.files.iter().any(|f| {
+                                        f.path.to_string_lossy().to_lowercase().contains(&filter_low)
+                                    })
+                                {
+                                    continue;
+                                }
+
+                                ui.push_id(grp_idx, |ui| {
+                                    egui::Frame::new()
+                                        .fill(pal.bg_card_subtle)
+                                        .stroke(Stroke::new(1.0_f32, pal.border_subtle))
+                                        .corner_radius(CornerRadius::same(8))
+                                        .inner_margin(egui::Margin::symmetric(12, 8))
+                                        .show(ui, |ui| {
+                                            ui.set_width(ui.available_width());
+                                            ui.horizontal_wrapped(|ui| {
+                                                draw_pill_badge(
+                                                    ui,
+                                                    &format!(
+                                                        "{}: {}",
+                                                        ds.badge_wasted,
+                                                        format_bytes(grp.wasted_bytes)
+                                                    ),
+                                                    Color32::from_rgba_unmultiplied(
+                                                        pal.accent_rust.r(),
+                                                        pal.accent_rust.g(),
+                                                        pal.accent_rust.b(),
+                                                        30,
+                                                    ),
+                                                    pal.accent_rust,
+                                                );
+                                                draw_pill_badge(
+                                                    ui,
+                                                    &format!(
+                                                        "{}: {} × {}",
+                                                        ds.badge_each,
+                                                        format_bytes(grp.each_size_bytes),
+                                                        grp.files.len()
+                                                    ),
+                                                    Color32::from_rgba_unmultiplied(
+                                                        pal.accent_cyan.r(),
+                                                        pal.accent_cyan.g(),
+                                                        pal.accent_cyan.b(),
+                                                        25,
+                                                    ),
+                                                    pal.accent_cyan,
+                                                );
+                                                let short_sha =
+                                                    &grp.sha256_hex[..grp.sha256_hex.len().min(16)];
+                                                ui.label(
+                                                    RichText::new(format!("SHA-256: {short_sha}…"))
+                                                        .size(11.0)
+                                                        .monospace()
+                                                        .color(pal.text_muted),
+                                                )
+                                                .on_hover_text(&grp.sha256_hex);
+                                            });
+
+                                            ui.add_space(4.0);
+                                            for (f_idx, item) in grp.files.iter_mut().enumerate() {
+                                                ui.push_id(f_idx, |ui| {
+                                                    let row_w = ui.available_width();
+                                                    ui.horizontal(|ui| {
+                                                        let left_w = (row_w - 120.0).max(180.0);
+                                                        ui.allocate_ui_with_layout(
+                                                            egui::vec2(left_w, 24.0),
+                                                            egui::Layout::left_to_right(
+                                                                egui::Align::Center,
+                                                            ),
+                                                            |ui| {
+                                                                ui.set_max_width(left_w);
+                                                                let cb = ui.checkbox(
+                                                                    &mut item.selected_for_deletion,
+                                                                    "",
+                                                                );
+                                                                if cb.hovered() {
+                                                                    ui.ctx().set_cursor_icon(
+                                                                        egui::CursorIcon::PointingHand,
+                                                                    );
+                                                                }
+                                                                if f_idx == 0
+                                                                    && !item.selected_for_deletion
+                                                                {
+                                                                    draw_pill_badge(
+                                                                        ui,
+                                                                        ds.badge_original_keep,
+                                                                        Color32::from_rgba_unmultiplied(
+                                                                            pal.accent_emerald.r(),
+                                                                            pal.accent_emerald.g(),
+                                                                            pal.accent_emerald.b(),
+                                                                            28,
+                                                                        ),
+                                                                        pal.accent_emerald,
+                                                                    );
+                                                                } else {
+                                                                    draw_pill_badge(
+                                                                        ui,
+                                                                        ds.badge_duplicate_copy,
+                                                                        Color32::from_rgba_unmultiplied(
+                                                                            pal.accent_amber.r(),
+                                                                            pal.accent_amber.g(),
+                                                                            pal.accent_amber.b(),
+                                                                            28,
+                                                                        ),
+                                                                        pal.accent_amber,
+                                                                    );
+                                                                }
+                                                                let p_str = item
+                                                                    .path
+                                                                    .to_string_lossy()
+                                                                    .to_string();
+                                                                ui.add(
+                                                                    egui::Label::new(
+                                                                        RichText::new(&p_str)
+                                                                            .size(11.0)
+                                                                            .monospace()
+                                                                            .color(pal.text_primary),
+                                                                    )
+                                                                    .truncate(),
+                                                                )
+                                                                .on_hover_text(&p_str);
+                                                            },
+                                                        );
+
+                                                        ui.with_layout(
+                                                            egui::Layout::right_to_left(
+                                                                egui::Align::Center,
+                                                            ),
+                                                            |ui| {
+                                                                if draw_action_button(
+                                                                    ui,
+                                                                    pal,
+                                                                    ds.btn_reveal_folder,
+                                                                    VectorIcon::FolderOpen,
+                                                                    ButtonVariant::Secondary,
+                                                                    true,
+                                                                ) {
+                                                                    let _ =
+                                                                        reveal_in_explorer(&item.path);
+                                                                }
+                                                            },
+                                                        );
+                                                    });
+                                                });
+                                            }
+                                        });
+                                });
+                                ui.add_space(4.0);
+                            }
+                        });
+                }
+                DiskSubView::LargeFiles => {
+                    egui::ScrollArea::vertical()
+                        .id_salt("disk_large_files_scroll")
+                        .max_height((ui.available_height() - 6.0).max(160.0))
+                        .show(ui, |ui| {
+                            if rep.large_files.is_empty() {
+                                draw_empty_state(
+                                    ui,
+                                    pal,
+                                    VectorIcon::CheckShield,
+                                    pal.accent_emerald,
+                                    ds.empty_no_large_title,
+                                    ds.empty_no_large_desc,
+                                );
+                                return;
+                            }
+
+                            let max_sz = rep
+                                .large_files
+                                .first()
+                                .map(|f| f.size_bytes.max(1))
+                                .unwrap_or(1);
+
+                            for (row_idx, lf) in rep.large_files.iter().enumerate() {
+                                let p_str = lf.path.to_string_lossy().to_string();
+                                if !filter_low.is_empty()
+                                    && !p_str.to_lowercase().contains(&filter_low)
+                                {
+                                    continue;
+                                }
+
+                                ui.push_id(row_idx, |ui| {
+                                    egui::Frame::new()
+                                        .fill(pal.bg_card_subtle)
+                                        .stroke(Stroke::new(1.0_f32, pal.border_subtle))
+                                        .corner_radius(CornerRadius::same(8))
+                                        .inner_margin(egui::Margin::symmetric(12, 8))
+                                        .show(ui, |ui| {
+                                            let row_w = ui.available_width();
+                                            ui.set_width(row_w);
+                                            ui.horizontal(|ui| {
+                                                let left_w = (row_w - 210.0).max(180.0);
+                                                ui.allocate_ui_with_layout(
+                                                    egui::vec2(left_w, 38.0),
+                                                    egui::Layout::top_down(egui::Align::Min),
+                                                    |ui| {
+                                                        ui.set_max_width(left_w);
+                                                        ui.horizontal_wrapped(|ui| {
+                                                            draw_pill_badge(
+                                                                ui,
+                                                                &format_bytes(lf.size_bytes),
+                                                                Color32::from_rgba_unmultiplied(
+                                                                    pal.accent_amber.r(),
+                                                                    pal.accent_amber.g(),
+                                                                    pal.accent_amber.b(),
+                                                                    30,
+                                                                ),
+                                                                pal.accent_amber,
+                                                            );
+                                                            draw_pill_badge(
+                                                                ui,
+                                                                current_lang
+                                                                    .localize_file_category(lf.category),
+                                                                Color32::from_rgba_unmultiplied(
+                                                                    pal.accent_cyan.r(),
+                                                                    pal.accent_cyan.g(),
+                                                                    pal.accent_cyan.b(),
+                                                                    25,
+                                                                ),
+                                                                pal.accent_cyan,
+                                                            );
+                                                            let fname = lf
+                                                                .path
+                                                                .file_name()
+                                                                .and_then(|n| n.to_str())
+                                                                .unwrap_or(&p_str);
+                                                            ui.label(
+                                                                RichText::new(fname)
+                                                                    .size(13.0)
+                                                                    .strong()
+                                                                    .color(pal.text_primary),
+                                                            );
+                                                        });
+                                                        ui.add(
+                                                            egui::Label::new(
+                                                                RichText::new(&p_str)
+                                                                    .size(10.5)
+                                                                    .monospace()
+                                                                    .color(pal.text_muted),
+                                                            )
+                                                            .truncate(),
+                                                        )
+                                                        .on_hover_text(&p_str);
+                                                    },
+                                                );
+
+                                                ui.with_layout(
+                                                    egui::Layout::right_to_left(
+                                                        egui::Align::Center,
+                                                    ),
+                                                    |ui| {
+                                                        if draw_action_button(
+                                                            ui,
+                                                            pal,
+                                                            ds.btn_delete_file,
+                                                            VectorIcon::TrashDelete,
+                                                            ButtonVariant::Danger,
+                                                            true,
+                                                        ) {
+                                                            single_large_delete_path =
+                                                                Some(lf.path.clone());
+                                                        }
+                                                        if draw_action_button(
+                                                            ui,
+                                                            pal,
+                                                            ds.btn_reveal_folder,
+                                                            VectorIcon::FolderOpen,
+                                                            ButtonVariant::Secondary,
+                                                            true,
+                                                        ) {
+                                                            let _ = reveal_in_explorer(&lf.path);
+                                                        }
+                                                    },
+                                                );
+                                            });
+
+                                            let ratio =
+                                                (lf.size_bytes as f32 / max_sz as f32).clamp(0.02, 1.0);
+                                            let (bar_rect, _) = ui.allocate_exact_size(
+                                                egui::vec2(ui.available_width(), 4.0),
+                                                Sense::hover(),
+                                            );
+                                            ui.painter().rect_filled(
+                                                bar_rect,
+                                                CornerRadius::same(2),
+                                                pal.bg_track,
+                                            );
+                                            let mut fill_r = bar_rect;
+                                            fill_r.set_width(bar_rect.width() * ratio);
+                                            ui.painter().rect_filled(
+                                                fill_r,
+                                                CornerRadius::same(2),
+                                                pal.accent_amber,
+                                            );
+                                        });
+                                });
+                                ui.add_space(4.0);
+                            }
+                        });
+                }
+                DiskSubView::Categories => {
+                    let total_b = rep.total_bytes_scanned.max(1);
+                    let cat_colors = |cat: FileCategory| -> Color32 {
+                        match cat {
+                            FileCategory::VideoMedia => pal.accent_purple,
+                            FileCategory::ArchivesDiskImages => pal.accent_amber,
+                            FileCategory::ExecutablesInstallers => pal.accent_rust,
+                            FileCategory::DevVmArtifacts => pal.accent_cyan,
+                            FileCategory::DocumentsPictures => pal.accent_emerald,
+                            FileCategory::LogsDumpsOther => pal.text_muted,
+                        }
+                    };
+
+                    // Stacked distribution bar
+                    let (bar_rect, _) = ui.allocate_exact_size(
+                        egui::vec2(ui.available_width(), 16.0),
+                        Sense::hover(),
+                    );
+                    ui.painter()
+                        .rect_filled(bar_rect, CornerRadius::same(6), pal.bg_track);
+                    let mut x_cursor = bar_rect.left();
+                    for st in &rep.categories {
+                        if st.total_bytes == 0 {
+                            continue;
+                        }
+                        let w = (st.total_bytes as f32 / total_b as f32) * bar_rect.width();
+                        if w >= 1.5 {
+                            let seg = Rect::from_min_max(
+                                Pos2::new(x_cursor, bar_rect.top()),
+                                Pos2::new(
+                                    (x_cursor + w).min(bar_rect.right()),
+                                    bar_rect.bottom(),
+                                ),
+                            );
+                            ui.painter().rect_filled(
+                                seg,
+                                CornerRadius::same(3),
+                                cat_colors(st.category),
+                            );
+                            x_cursor += w;
+                        }
+                    }
+
+                    ui.add_space(10.0);
+
+                    for st in &rep.categories {
+                        let pct = (st.total_bytes as f64 / total_b as f64) * 100.0;
+                        let col = cat_colors(st.category);
+                        egui::Frame::new()
+                            .fill(pal.bg_card_subtle)
+                            .stroke(Stroke::new(1.0_f32, pal.border_subtle))
+                            .corner_radius(CornerRadius::same(8))
+                            .inner_margin(egui::Margin::symmetric(12, 8))
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width());
+                                ui.horizontal(|ui| {
+                                    let (dot_r, _) = ui.allocate_exact_size(
+                                        egui::vec2(10.0, 10.0),
+                                        Sense::hover(),
+                                    );
+                                    ui.painter().circle_filled(dot_r.center(), 5.0, col);
+                                    ui.label(
+                                        RichText::new(
+                                            current_lang.localize_file_category(st.category),
+                                        )
+                                        .size(13.5)
+                                        .strong()
+                                        .color(pal.text_primary),
+                                    );
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            draw_pill_badge(
+                                                ui,
+                                                &format!("{pct:.1}%"),
+                                                Color32::from_rgba_unmultiplied(
+                                                    col.r(),
+                                                    col.g(),
+                                                    col.b(),
+                                                    28,
+                                                ),
+                                                col,
+                                            );
+                                            ui.label(
+                                                RichText::new(format!(
+                                                    "{} ({} files)",
+                                                    format_bytes(st.total_bytes),
+                                                    st.file_count
+                                                ))
+                                                .size(12.5)
+                                                .monospace()
+                                                .strong()
+                                                .color(pal.text_secondary),
+                                            );
+                                        },
+                                    );
+                                });
+                            });
+                        ui.add_space(4.0);
+                    }
+                }
+            }
+        });
+
+        if let Some(target_del) = single_large_delete_path {
+            match delete_analyzed_file(&target_del) {
+                Ok(()) => {
+                    if let Some(rep) = &mut self.disk_report {
+                        rep.large_files.retain(|f| f.path != target_del);
+                    }
+                    self.status_banner = format!("Deleted '{}'", target_del.display());
+                }
+                Err(e) => self.status_banner = e,
+            }
+        }
     }
 }

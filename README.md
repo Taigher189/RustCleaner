@@ -1,6 +1,6 @@
 # 🦀 RustCleaner
 
-[![Status: Alpha](https://img.shields.io/badge/Status-v1.3.0--alpha-red?style=for-the-badge)](#)
+[![Status: Alpha](https://img.shields.io/badge/Status-v1.4.0--alpha-red?style=for-the-badge)](#)
 [![Rust](https://img.shields.io/badge/Language-Rust%202021-orange?style=for-the-badge&logo=rust)](https://www.rust-lang.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(x64)-0078D6?style=for-the-badge&logo=windows)](https://microsoft.com/windows)
 [![Privacy](https://img.shields.io/badge/Privacy-Zero%20Telemetry%20%E2%80%A2%200%20MB%20Idle%20RAM-10B981?style=for-the-badge)](#)
@@ -15,6 +15,7 @@ Ships as a single **standalone portable `.exe`** with a responsive **Dark/Light 
 ## ✨ Features
 
 - **🧹 File System & Browser Cleaner**: Multi-threaded parallel scanning (`rayon` + `walkdir`) across temp folders, logs, crash dumps, Recycle Bin (`SHEmptyRecycleBinW`), and browser/app caches (Chrome, Edge, Firefox, Brave, VS Code, Discord). Safely skips locked files without errors.
+- **🔍 Disk Space Analyzer & SHA-256 Duplicate Finder**: Multi-stage duplicate detection (Exact Size -> 8 KB Boundary Fingerprint -> Full Cryptographic SHA-256), large file hunter, and interactive category disk breakdown with safe duplicate deletion.
 - **🧩 Registry Cleaner with Mandatory Backup**: Scans orphaned keys (`SharedDLLs`, `App Paths`, `FileExts`, `MuiCache`, `AppCompatFlags`, `Run`, `Installer`) with automatic `Windows Registry Editor Version 5.00` (`.reg`) backup before changes.
 - **🚀 Startup & Uninstaller Manager**: Inspects and toggles startup entries via native `StartupApproved\Run` flags and launches uninstallers with automatic UAC elevation support.
 - **💿 Low-Level Free Space Wiper**: Sanitizes unallocated drive space (Zero, DoD 5220.22-M, NSA, Gutmann) using unbuffered writes (`FILE_FLAG_WRITE_THROUGH`) while leaving user files and Windows system untouched.
