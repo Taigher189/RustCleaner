@@ -4,12 +4,14 @@
 //! Supports both a modern Obsidian Desktop GUI (`eframe`/`egui`) and full CLI subcommands (`clap`).
 
 pub mod cleaner;
+pub mod decrapifier;
 pub mod disk_analyzer;
 pub mod driver_updater;
 pub mod gui;
 pub mod i18n;
 pub mod monitor;
 pub mod registry;
+pub mod residual_hunter;
 pub mod scheduler;
 pub mod software_updater;
 pub mod startup_uninstall;

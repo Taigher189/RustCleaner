@@ -1,0 +1,50 @@
+name: 🐛 Bug Report
+description: Segnala un problema o un crash in RustCleaner
+title: "[BUG]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Grazie per aver segnalato un bug! RustCleaner è progettato per essere affidabile e sicuro.
+  - type: input
+    id: version
+    attributes:
+      label: Versione di RustCleaner
+      description: Es. v1.5.0-alpha, release portatile o compilata da sorgente.
+      placeholder: v1.5.0-alpha
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Sistema Operativo
+      options:
+        - Windows 11 (x64)
+        - Windows 10 (x64)
+        - Windows Server
+        - Altro
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Descrizione del problema
+      description: Spiega cosa è successo e cosa ti aspettavi accadesse.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Passaggi per riprodurre
+      description: |
+        1. Vai su '...'
+        2. Clicca su '...'
+        3. Errore riscontrato
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log o Screenshot (opzionale)
+      description: Incolla l'output della console o trascina screenshot.

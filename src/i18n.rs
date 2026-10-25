@@ -1793,6 +1793,29 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_all_residual_strings_in_all_languages() {
+        for &lang in Language::all() {
+            let res = lang.residual_hunter();
+            assert!(!res.btn_deep_uninstall.is_empty());
+            assert!(!res.btn_scan_residuals.is_empty());
+            assert!(!res.btn_global_orphans.is_empty());
+            assert!(!res.title_residual_hunter.is_empty());
+            assert!(!res.btn_clean_selected.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_all_decrapifier_strings_in_all_languages() {
+        for &lang in Language::all() {
+            let dec = lang.decrapifier();
+            assert!(!dec.page_title.is_empty());
+            assert!(!dec.btn_apply_recommended.is_empty());
+            assert!(!dec.btn_restore_defaults.is_empty());
+            assert!(!dec.kpi_tweaks_active.is_empty());
+        }
+    }
 }
 
 
@@ -2198,4 +2221,406 @@ pub static DISK_STRINGS_PT: DiskAnalyzerStrings = DiskAnalyzerStrings {
     empty_no_dups_desc: "Não foram encontrados arquivos com conteúdo SHA-256 idêntico.",
     empty_no_large_title: "Nenhum Arquivo Grande Acima do Limite",
     empty_no_large_desc: "Reduza o limite em MB para listar mais arquivos.",
+};
+
+// ============================================================================
+// DEEP RESIDUAL HUNTER (LEFTOVER HUNTER) LOCALIZATION (7 LANGUAGES)
+// ============================================================================
+pub struct ResidualHunterStrings {
+    pub btn_deep_uninstall: &'static str,
+    pub btn_scan_residuals: &'static str,
+    pub btn_global_orphans: &'static str,
+    pub title_residual_hunter: &'static str,
+    pub sub_residual_hunter: &'static str,
+    pub kpi_items_found: &'static str,
+    pub kpi_space_reclaimable: &'static str,
+    pub kpi_reg_keys: &'static str,
+    pub btn_clean_selected: &'static str,
+    pub btn_select_all: &'static str,
+    pub btn_deselect_all: &'static str,
+    pub btn_select_safe: &'static str,
+    pub btn_back_to_apps: &'static str,
+    pub status_cleaning: &'static str,
+    pub status_completed: &'static str,
+    pub filter_placeholder: &'static str,
+    pub empty_title: &'static str,
+    pub empty_desc: &'static str,
+}
+
+impl Language {
+    pub fn residual_hunter(&self) -> &'static ResidualHunterStrings {
+        match self {
+            Language::Italian => &RESIDUAL_STRINGS_IT,
+            Language::English => &RESIDUAL_STRINGS_EN,
+            Language::French => &RESIDUAL_STRINGS_FR,
+            Language::Spanish => &RESIDUAL_STRINGS_ES,
+            Language::German => &RESIDUAL_STRINGS_DE,
+            Language::Chinese => &RESIDUAL_STRINGS_ZH,
+            Language::Portuguese => &RESIDUAL_STRINGS_PT,
+        }
+    }
+}
+
+pub static RESIDUAL_STRINGS_IT: ResidualHunterStrings = ResidualHunterStrings {
+    btn_deep_uninstall: "Disinstallazione Profonda",
+    btn_scan_residuals: "Cerca Residui",
+    btn_global_orphans: "Trova Cartelle & Chiavi Orfane di App Disinstallate",
+    title_residual_hunter: "Deep Residual Hunter (Cacciatore Residui Orfani)",
+    sub_residual_hunter: "Individua ed elimina cartelle e chiavi di registro lasciate indietro dai disinstallatori classici di Windows (con backup .reg automatico).",
+    kpi_items_found: "ELEMENTI RESIDUI",
+    kpi_space_reclaimable: "SPAZIO RECUPERABILE",
+    kpi_reg_keys: "CHIAVI REGISTRO",
+    btn_clean_selected: "Elimina Residui Selezionati & Salva Backup .reg",
+    btn_select_all: "Tutti",
+    btn_deselect_all: "Nessuno",
+    btn_select_safe: "Solo Alta Sicurezza",
+    btn_back_to_apps: "Torna alla Lista Applicazioni",
+    status_cleaning: "Eliminazione residui e generazione backup di ripristino .reg in corso...",
+    status_completed: "Pulizia residui completata con successo! Backup salvato in registry_backups/.",
+    filter_placeholder: "Cerca percorso o chiave tra i residui...",
+    empty_title: "Nessun Residuo Trovato",
+    empty_desc: "L'applicazione o il sistema non presenta tracce orfane nelle cartelle e chiavi di registro analizzate.",
+};
+
+pub static RESIDUAL_STRINGS_EN: ResidualHunterStrings = ResidualHunterStrings {
+    btn_deep_uninstall: "Deep Uninstall",
+    btn_scan_residuals: "Scan Leftovers",
+    btn_global_orphans: "Scan Orphan Folders & Keys from Past Uninstalls",
+    title_residual_hunter: "Deep Residual Hunter (Leftover Cleaner)",
+    sub_residual_hunter: "Locate and nuke leftover folders, files, and registry keys left behind by standard Windows uninstallers (with auto .reg backup).",
+    kpi_items_found: "LEFTOVER ITEMS",
+    kpi_space_reclaimable: "RECLAIMABLE SPACE",
+    kpi_reg_keys: "REGISTRY KEYS",
+    btn_clean_selected: "Nuke Selected Leftovers & Save .reg Backup",
+    btn_select_all: "All",
+    btn_deselect_all: "None",
+    btn_select_safe: "High Confidence Only",
+    btn_back_to_apps: "Back to Installed Apps",
+    status_cleaning: "Removing leftovers and exporting rollback .reg backup...",
+    status_completed: "Leftover cleaning completed successfully! Rollback backup saved in registry_backups/.",
+    filter_placeholder: "Search paths or registry keys...",
+    empty_title: "No Leftovers Found",
+    empty_desc: "No orphaned folders or registry entries were detected for this item.",
+};
+
+pub static RESIDUAL_STRINGS_FR: ResidualHunterStrings = ResidualHunterStrings {
+    btn_deep_uninstall: "Désinstallation Profonde",
+    btn_scan_residuals: "Scanner les Résidus",
+    btn_global_orphans: "Trouver Dossiers & Clés Orphelins d'Anciennes Désinstallations",
+    title_residual_hunter: "Deep Residual Hunter (Nettoyeur de Résidus)",
+    sub_residual_hunter: "Détecte et supprime les dossiers et clés de registre oubliés par les désinstallateurs standards de Windows (avec sauvegarde .reg auto).",
+    kpi_items_found: "ÉLÉMENTS RÉSIDUELS",
+    kpi_space_reclaimable: "ESPACE RÉCUPÉRABLE",
+    kpi_reg_keys: "CLÉS DE REGISTRE",
+    btn_clean_selected: "Supprimer les Résidus & Sauvegarder .reg",
+    btn_select_all: "Tous",
+    btn_deselect_all: "Aucun",
+    btn_select_safe: "Sécurité Haute Uniquement",
+    btn_back_to_apps: "Retour aux Applications",
+    status_cleaning: "Suppression des résidus et exportation de la sauvegarde .reg...",
+    status_completed: "Nettoyage des résidus terminé avec succès ! Sauvegarde dans registry_backups/.",
+    filter_placeholder: "Rechercher parmi les résidus...",
+    empty_title: "Aucun Résidu Détecté",
+    empty_desc: "Aucun dossier ou clé orpheline n'a été trouvé.",
+};
+
+pub static RESIDUAL_STRINGS_ES: ResidualHunterStrings = ResidualHunterStrings {
+    btn_deep_uninstall: "Desinstalación Profunda",
+    btn_scan_residuals: "Buscar Residuos",
+    btn_global_orphans: "Buscar Carpetas & Claves Huérfanas de Apps Desinstaladas",
+    title_residual_hunter: "Deep Residual Hunter (Cazador de Residuos)",
+    sub_residual_hunter: "Localiza y elimina carpetas y claves de registro dejadas por desinstaladores clásicos (con copia de seguridad .reg automática).",
+    kpi_items_found: "ELEMENTOS RESIDUALES",
+    kpi_space_reclaimable: "ESPACIO RECUPERABLE",
+    kpi_reg_keys: "CLAVES REGISTRO",
+    btn_clean_selected: "Eliminar Residuos & Guardar Copia .reg",
+    btn_select_all: "Todos",
+    btn_deselect_all: "Ninguno",
+    btn_select_safe: "Solo Alta Seguridad",
+    btn_back_to_apps: "Volver a Aplicaciones",
+    status_cleaning: "Eliminando residuos y generando copia de respaldo .reg...",
+    status_completed: "¡Limpieza de residuos completada con éxito! Respaldo en registry_backups/.",
+    filter_placeholder: "Buscar ruta o clave residual...",
+    empty_title: "No se Encontraron Residuos",
+    empty_desc: "No se encontraron carpetas o claves huérfanas.",
+};
+
+pub static RESIDUAL_STRINGS_DE: ResidualHunterStrings = ResidualHunterStrings {
+    btn_deep_uninstall: "Tiefendeinstallation",
+    btn_scan_residuals: "Reste Scannen",
+    btn_global_orphans: "Verwaiste Ordner & Registrierungsschlüssel Aufspüren",
+    title_residual_hunter: "Deep Residual Hunter (Rückstands-Jäger)",
+    sub_residual_hunter: "Findet und vernichtet verwaiste Ordner, Dateien und Registry-Schlüssel nach Deinstallationen (mit automatischer .reg Sicherung).",
+    kpi_items_found: "VERWAISTE ELEMENTE",
+    kpi_space_reclaimable: "FREIGEBBARER SPEICHER",
+    kpi_reg_keys: "REGISTRY-SCHLÜSSEL",
+    btn_clean_selected: "Reste Entfernen & .reg Backup Sichern",
+    btn_select_all: "Alle",
+    btn_deselect_all: "Keine",
+    btn_select_safe: "Nur Hohe Sicherheit",
+    btn_back_to_apps: "Zurück zu Anwendungen",
+    status_cleaning: "Löschen von Resten und Erstellen von .reg Sicherung...",
+    status_completed: "Bereinigung erfolgreich abgeschlossen! Sicherung in registry_backups/.",
+    filter_placeholder: "Pfade oder Schlüssel durchsuchen...",
+    empty_title: "Keine Rückstände Gefunden",
+    empty_desc: "Keine verwaisten Ordner oder Registry-Einträge gefunden.",
+};
+
+pub static RESIDUAL_STRINGS_ZH: ResidualHunterStrings = ResidualHunterStrings {
+    btn_deep_uninstall: "深度卸载 (强力清理残留)",
+    btn_scan_residuals: "查找残留",
+    btn_global_orphans: "查找以往已卸载软件的残留孤立文件夹与注册表项",
+    title_residual_hunter: "Deep Residual Hunter (卸载残留猎手)",
+    sub_residual_hunter: "定位并清除传统 Windows 卸载程序遗留的垃圾文件夹、文件与注册表项（附带全自动 .reg 恢复备份）。",
+    kpi_items_found: "残留项目总数",
+    kpi_space_reclaimable: "可回收磁盘空间",
+    kpi_reg_keys: "注册表残留项",
+    btn_clean_selected: "彻底清除选中残留并生成 .reg 备份",
+    btn_select_all: "全选",
+    btn_deselect_all: "全不选",
+    btn_select_safe: "仅高安全度项",
+    btn_back_to_apps: "返回已安装程序列表",
+    status_cleaning: "正在清理残留文件并生成注册表备份...",
+    status_completed: "残留清理成功完成！恢复备份已保存至 registry_backups/。",
+    filter_placeholder: "在残留路径或注册表项中搜索...",
+    empty_title: "未发现任何卸载残留",
+    empty_desc: "未检测到孤立残留文件夹或注册表分支。",
+};
+
+pub static RESIDUAL_STRINGS_PT: ResidualHunterStrings = ResidualHunterStrings {
+    btn_deep_uninstall: "Desinstalação Profunda",
+    btn_scan_residuals: "Buscar Resíduos",
+    btn_global_orphans: "Procurar Pastas e Chaves Órfãs de Desinstalações Antigas",
+    title_residual_hunter: "Deep Residual Hunter (Caçador de Resíduos)",
+    sub_residual_hunter: "Localiza e elimina pastas, arquivos e chaves de registro esquecidas por desinstaladores (com backup .reg automático).",
+    kpi_items_found: "ITENS RESIDUAIS",
+    kpi_space_reclaimable: "ESPAÇO RECUPERÁVEL",
+    kpi_reg_keys: "CHAVES DE REGISTRO",
+    btn_clean_selected: "Excluir Resíduos Selecionados & Salvar Backup .reg",
+    btn_select_all: "Todos",
+    btn_deselect_all: "Nenhum",
+    btn_select_safe: "Apenas Alta Segurança",
+    btn_back_to_apps: "Voltar para Lista de Aplicativos",
+    status_cleaning: "Excluindo resíduos e gerando backup .reg...",
+    status_completed: "Limpeza de resíduos concluída com sucesso! Backup salvo em registry_backups/.",
+    filter_placeholder: "Buscar caminho ou chave residual...",
+    empty_title: "Nenhum Resíduo Encontrado",
+    empty_desc: "Não foram encontradas pastas ou chaves órfãs.",
+};
+
+// ============================================================================
+// WINDOWS 11 PRIVACY & DECRAPIFIER LOCALIZATION (7 LANGUAGES)
+// ============================================================================
+pub struct DecrapifierStrings {
+    pub nav_title: &'static str,
+    pub nav_sub: &'static str,
+    pub page_title: &'static str,
+    pub page_subtitle: &'static str,
+    pub btn_apply_recommended: &'static str,
+    pub btn_restore_defaults: &'static str,
+    pub btn_scan_appx: &'static str,
+    pub btn_remove_selected_appx: &'static str,
+    pub kpi_tweaks_active: &'static str,
+    pub kpi_privacy_status: &'static str,
+    pub kpi_bloatware_found: &'static str,
+    pub tab_tweaks: &'static str,
+    pub tab_appx: &'static str,
+    pub badge_recommended: &'static str,
+    pub badge_active: &'static str,
+    pub badge_default: &'static str,
+    pub cat_privacy: &'static str,
+    pub cat_start: &'static str,
+    pub cat_edge: &'static str,
+    pub cat_appx: &'static str,
+    pub status_applied: &'static str,
+    pub status_restored: &'static str,
+}
+
+impl Language {
+    pub fn decrapifier(&self) -> &'static DecrapifierStrings {
+        match self {
+            Language::Italian => &DECRAP_STRINGS_IT,
+            Language::English => &DECRAP_STRINGS_EN,
+            Language::French => &DECRAP_STRINGS_FR,
+            Language::Spanish => &DECRAP_STRINGS_ES,
+            Language::German => &DECRAP_STRINGS_DE,
+            Language::Chinese => &DECRAP_STRINGS_ZH,
+            Language::Portuguese => &DECRAP_STRINGS_PT,
+        }
+    }
+}
+
+pub static DECRAP_STRINGS_IT: DecrapifierStrings = DecrapifierStrings {
+    nav_title: "Privacy & Decrapifier",
+    nav_sub: "Telemetria, Bing, Edge & AppX",
+    page_title: "Windows 11 Privacy Fortress & Decrapifier",
+    page_subtitle: "Disattiva la telemetria invasiva, rimuovi la ricerca Bing dal menu Start, i widget MSN e il bloatware preinstallato con rollback in 1 clic.",
+    btn_apply_recommended: "Applica Ottimizzazione Consigliata",
+    btn_restore_defaults: "Ripristina Default Windows (Rollback)",
+    btn_scan_appx: "Cerca App Preinstallate",
+    btn_remove_selected_appx: "Disinstalla App Selezionate",
+    kpi_tweaks_active: "TWEAK ATTIVI",
+    kpi_privacy_status: "LIVELLO PRIVACY",
+    kpi_bloatware_found: "BLOATWARE RILEVATI",
+    tab_tweaks: "Privacy & Ottimizzazioni Sistema",
+    tab_appx: "Rimozione App Preinstallate (AppX)",
+    badge_recommended: "CONSIGLIATO",
+    badge_active: "ATTIVO (PROTETTO)",
+    badge_default: "DEFAULT WINDOWS",
+    cat_privacy: "Privacy & Telemetria",
+    cat_start: "Menu Start & Esplora Risorse",
+    cat_edge: "Sistema & Microsoft Edge",
+    cat_appx: "Bloatware Consumer",
+    status_applied: "Ottimizzazioni consigliate per Privacy e Prestazioni applicate con successo!",
+    status_restored: "Impostazioni di fabbrica di Windows ripristinate con successo (Rollback completato).",
+};
+
+pub static DECRAP_STRINGS_EN: DecrapifierStrings = DecrapifierStrings {
+    nav_title: "Privacy & Decrapifier",
+    nav_sub: "Telemetry, Bing, Edge & AppX",
+    page_title: "Windows 11 Privacy Fortress & Decrapifier",
+    page_subtitle: "Disable invasive telemetry, strip Bing web search from Start, kill MSN widgets and consumer bloatware with 1-click safe rollback.",
+    btn_apply_recommended: "Apply Recommended Privacy Tweaks",
+    btn_restore_defaults: "Restore Stock Windows Defaults",
+    btn_scan_appx: "Scan Preinstalled Apps",
+    btn_remove_selected_appx: "Uninstall Selected Apps",
+    kpi_tweaks_active: "ACTIVE TWEAKS",
+    kpi_privacy_status: "PRIVACY LEVEL",
+    kpi_bloatware_found: "BLOATWARE DETECTED",
+    tab_tweaks: "Privacy & System Tweaks",
+    tab_appx: "Preinstalled AppX Removal",
+    badge_recommended: "RECOMMENDED",
+    badge_active: "PROTECTED",
+    badge_default: "STOCK DEFAULT",
+    cat_privacy: "Privacy & Telemetry",
+    cat_start: "Start Menu & Explorer",
+    cat_edge: "System & Microsoft Edge",
+    cat_appx: "Consumer Bloatware",
+    status_applied: "Recommended Privacy & Performance optimizations applied successfully!",
+    status_restored: "Stock Windows defaults restored successfully (Rollback complete).",
+};
+
+pub static DECRAP_STRINGS_FR: DecrapifierStrings = DecrapifierStrings {
+    nav_title: "Confidentialité & Débloat",
+    nav_sub: "Télémétrie, Bing, Edge & AppX",
+    page_title: "Forteresse de Confidentialité & Débloat Windows 11",
+    page_subtitle: "Désactivez la télémétrie, supprimez Bing du menu Démarrer et les bloatwares préinstallés avec restauration en 1 clic.",
+    btn_apply_recommended: "Appliquer les Réglages Recommandés",
+    btn_restore_defaults: "Restaurer les Valeurs par Défaut",
+    btn_scan_appx: "Rechercher les Applications Préinstallées",
+    btn_remove_selected_appx: "Désinstaller les Applications Sélectionnées",
+    kpi_tweaks_active: "RÉGLAGES ACTIFS",
+    kpi_privacy_status: "NIVEAU DE CONFIDENTIALITÉ",
+    kpi_bloatware_found: "BLOATWARES DÉTECTÉS",
+    tab_tweaks: "Confidentialité & Système",
+    tab_appx: "Suppression AppX Préinstallées",
+    badge_recommended: "RECOMMANDÉ",
+    badge_active: "ACTIF (PROTÉGÉ)",
+    badge_default: "PAR DÉFAUT",
+    cat_privacy: "Confidentialité & Télémétrie",
+    cat_start: "Menu Démarrer & Explorateur",
+    cat_edge: "Système & Microsoft Edge",
+    cat_appx: "Bloatware Grand Public",
+    status_applied: "Optimisations recommandées appliquées avec succès !",
+    status_restored: "Paramètres par défaut de Windows restaurés avec succès.",
+};
+
+pub static DECRAP_STRINGS_ES: DecrapifierStrings = DecrapifierStrings {
+    nav_title: "Privacidad & Decrapifier",
+    nav_sub: "Telemetría, Bing, Edge & AppX",
+    page_title: "Fortaleza de Privacidad & Decrapifier Windows 11",
+    page_subtitle: "Desactive telemetría invasiva, elimine Bing del menú Inicio, widgets MSN y bloatware con reversión segura en 1 clic.",
+    btn_apply_recommended: "Aplicar Optimización Recomendada",
+    btn_restore_defaults: "Restaurar Predeterminados de Windows",
+    btn_scan_appx: "Buscar Apps Preinstaladas",
+    btn_remove_selected_appx: "Desinstalar Apps Seleccionadas",
+    kpi_tweaks_active: "TWEAKS ACTIVOS",
+    kpi_privacy_status: "NIVEL DE PRIVACIDAD",
+    kpi_bloatware_found: "BLOATWARE DETECTADO",
+    tab_tweaks: "Privacidad & Ajustes de Sistema",
+    tab_appx: "Eliminación de AppX Preinstaladas",
+    badge_recommended: "RECOMENDADO",
+    badge_active: "PROTEGIDO",
+    badge_default: "PREDETERMINADO",
+    cat_privacy: "Privacidad & Telemetría",
+    cat_start: "Menú Inicio & Explorador",
+    cat_edge: "Sistema & Microsoft Edge",
+    cat_appx: "Bloatware Consumo",
+    status_applied: "¡Optimizaciones recomendadas de privacidad aplicadas con éxito!",
+    status_restored: "Valores predeterminados de Windows restaurados con éxito.",
+};
+
+pub static DECRAP_STRINGS_DE: DecrapifierStrings = DecrapifierStrings {
+    nav_title: "Datenschutz & Entschlackung",
+    nav_sub: "Telemetrie, Bing, Edge & AppX",
+    page_title: "Windows 11 Datenschutz-Festung & Decrapifier",
+    page_subtitle: "Invasive Telemetrie deaktivieren, Bing aus dem Startmenü entfernen und Bloatware mit 1-Klick-Wiederherstellung löschen.",
+    btn_apply_recommended: "Empfohlene Optimierungen Anwenden",
+    btn_restore_defaults: "Windows-Standardwerte Wiederherstellen",
+    btn_scan_appx: "Vorinstallierte Apps Scannen",
+    btn_remove_selected_appx: "Ausgewählte Apps Deinstallieren",
+    kpi_tweaks_active: "AKTIVE TWEAKS",
+    kpi_privacy_status: "DATENSCHUTZ-STATUS",
+    kpi_bloatware_found: "BLOATWARE ERKANNT",
+    tab_tweaks: "Datenschutz & System-Tweaks",
+    tab_appx: "Vorinstallierte AppX Entfernen",
+    badge_recommended: "EMPFOHLEN",
+    badge_active: "GESCHÜTZT",
+    badge_default: "STANDARD",
+    cat_privacy: "Datenschutz & Telemetrie",
+    cat_start: "Startmenü & Explorer",
+    cat_edge: "System & Microsoft Edge",
+    cat_appx: "Vorinstallierte Bloatware",
+    status_applied: "Empfohlene Datenschutz- und Leistungseinstellungen erfolgreich angewendet!",
+    status_restored: "Windows-Standardeinstellungen erfolgreich wiederhergestellt.",
+};
+
+pub static DECRAP_STRINGS_ZH: DecrapifierStrings = DecrapifierStrings {
+    nav_title: "隐私增强与系统净化",
+    nav_sub: "遥测禁用、Bing 搜索去除与 AppX 预装清理",
+    page_title: "Windows 11 隐私堡垒与系统净化器 (Decrapifier)",
+    page_subtitle: "一键禁用微软侵入式遥测、去除开始菜单 Bing 联网搜索与 MSN 小组件，强力卸载预装推广垃圾应用，支持一键安全还原。",
+    btn_apply_recommended: "应用推荐隐私与性能优化",
+    btn_restore_defaults: "恢复 Windows 原厂默认设置 (一键还原)",
+    btn_scan_appx: "扫描预装推广应用 (AppX)",
+    btn_remove_selected_appx: "卸载所选预装应用",
+    kpi_tweaks_active: "已生效优化项",
+    kpi_privacy_status: "隐私防护等级",
+    kpi_bloatware_found: "检测到垃圾预装",
+    tab_tweaks: "隐私与系统调优",
+    tab_appx: "预装推广应用清理",
+    badge_recommended: "强烈推荐",
+    badge_active: "已加固 (隐私保护)",
+    badge_default: "系统默认状态",
+    cat_privacy: "隐私保护与遥测收集",
+    cat_start: "开始菜单与资源管理器",
+    cat_edge: "系统与 Edge 后台服务",
+    cat_appx: "预装推广应用",
+    status_applied: "已成功应用所有推荐隐私与系统性能优化项！",
+    status_restored: "已成功恢复 Windows 原厂默认设置（还原完成）。",
+};
+
+pub static DECRAP_STRINGS_PT: DecrapifierStrings = DecrapifierStrings {
+    nav_title: "Privacidade & Decrapifier",
+    nav_sub: "Telemetria, Bing, Edge & AppX",
+    page_title: "Fortaleza de Privacidade & Decrapifier Windows 11",
+    page_subtitle: "Desative a telemetria invasiva, remova o Bing do menu Iniciar, os widgets MSN e o bloatware com reversão segura em 1 clique.",
+    btn_apply_recommended: "Aplicar Otimizações Recomendadas",
+    btn_restore_defaults: "Restaurar Padrões do Windows",
+    btn_scan_appx: "Escanear Aplicativos Pré-instalados",
+    btn_remove_selected_appx: "Desinstalar Apps Selecionados",
+    kpi_tweaks_active: "TWEAKS ATIVOS",
+    kpi_privacy_status: "NÍVEL DE PRIVACIDADE",
+    kpi_bloatware_found: "BLOATWARE DETECTADO",
+    tab_tweaks: "Privacidade & Ajustes de Sistema",
+    tab_appx: "Remoção de AppX Pré-instalados",
+    badge_recommended: "RECOMENDADO",
+    badge_active: "PROTEGIDO",
+    badge_default: "PADRÃO",
+    cat_privacy: "Privacidade & Telemetria",
+    cat_start: "Menu Iniciar & Explorer",
+    cat_edge: "Sistema & Microsoft Edge",
+    cat_appx: "Bloatware de Consumo",
+    status_applied: "Otimizações recomendadas de privacidade aplicadas com sucesso!",
+    status_restored: "Configurações padrão do Windows restauradas com sucesso.",
 };

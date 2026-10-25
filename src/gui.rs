@@ -130,10 +130,17 @@ pub enum ActiveTab {
     Registry,
     Startup,
     Uninstaller,
+    Decrapifier,
     DriveWiper,
     SoftwareUpdater,
     DriverUpdater,
     AutomationMonitor,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecrapSubtab {
+    Tweaks,
+    Appx,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -248,6 +255,22 @@ pub struct RustCleanerApp {
     pub disk_cancel: Arc<AtomicBool>,
     pub disk_report: Option<DiskAnalysisReport>,
     pub disk_rx: Arc<Mutex<Option<DiskAnalysisReport>>>,
+
+    // 9. Deep Residual Hunter (Leftover Hunter) State
+    pub residual_summary: Option<crate::residual_hunter::ResidualScanSummary>,
+    pub residual_filter: String,
+    pub residual_status_msg: Option<String>,
+    pub is_global_orphan_mode: bool,
+
+    // 10. Windows 11 Privacy & Decrapifier State
+    pub decrap_tweaks_state: Vec<(String, bool)>,
+    pub decrap_appx_packages: Vec<crate::decrapifier::AppxPackageInfo>,
+    pub decrap_appx_scanned: bool,
+    pub decrap_appx_busy: bool,
+    pub decrap_appx_rx: Arc<Mutex<Option<Vec<crate::decrapifier::AppxPackageInfo>>>>,
+    pub decrap_subtab: DecrapSubtab,
+    pub decrap_status_msg: Option<String>,
+    pub decrap_filter: String,
 }
 
 impl Default for RustCleanerApp {
@@ -324,6 +347,21 @@ impl Default for RustCleanerApp {
             disk_cancel: Arc::new(AtomicBool::new(false)),
             disk_report: None,
             disk_rx: Arc::new(Mutex::new(None)),
+            residual_summary: None,
+            residual_filter: String::new(),
+            residual_status_msg: None,
+            is_global_orphan_mode: false,
+            decrap_tweaks_state: crate::decrapifier::REGISTRY_TWEAKS
+                .iter()
+                .map(|t| (t.id.to_string(), crate::decrapifier::is_tweak_active(t)))
+                .collect(),
+            decrap_appx_packages: Vec::new(),
+            decrap_appx_scanned: false,
+            decrap_appx_busy: false,
+            decrap_appx_rx: Arc::new(Mutex::new(None)),
+            decrap_subtab: DecrapSubtab::Tweaks,
+            decrap_status_msg: None,
+            decrap_filter: String::new(),
         }
     }
 }
@@ -1054,6 +1092,15 @@ impl eframe::App for RustCleanerApp {
             }
         }
 
+        // Poll background Decrapifier AppX scan results
+        if let Ok(mut guard) = self.decrap_appx_rx.lock() {
+            if let Some(pkgs) = guard.take() {
+                self.decrap_appx_busy = false;
+                self.decrap_appx_scanned = true;
+                self.decrap_appx_packages = pkgs;
+            }
+        }
+
         let wiper_running = self
             .wipe_progress
             .lock()
@@ -1397,6 +1444,11 @@ impl eframe::App for RustCleanerApp {
                         };
 
                         let ds = self.language.disk_analyzer();
+                        let dec = self.language.decrapifier();
+                        let decrap_active_cnt = {
+                            let count = self.decrap_tweaks_state.iter().filter(|(_, active)| *active).count();
+                            if count > 0 { Some(count) } else { None }
+                        };
                         let disk_dup_cnt = self
                             .disk_report
                             .as_ref()
@@ -1443,6 +1495,14 @@ impl eframe::App for RustCleanerApp {
                                 s.nav_uninstall_title,
                                 s.nav_uninstall_sub,
                                 Some(self.installed_apps.len()),
+                            ),
+                            (
+                                ActiveTab::Decrapifier,
+                                VectorIcon::CheckShield,
+                                pal.accent_emerald,
+                                dec.nav_title,
+                                dec.nav_sub,
+                                decrap_active_cnt,
                             ),
                             (
                                 ActiveTab::DriveWiper,
@@ -1565,6 +1625,7 @@ impl eframe::App for RustCleanerApp {
                 ActiveTab::Registry => self.render_registry_tab(ui, &pal),
                 ActiveTab::Startup => self.render_startup_tab(ui, &pal),
                 ActiveTab::Uninstaller => self.render_uninstaller_tab(ui, &pal),
+                ActiveTab::Decrapifier => self.render_decrapifier_tab(ui, &pal),
                 ActiveTab::DriveWiper => self.render_wiper_tab(ui, &pal),
                 ActiveTab::SoftwareUpdater => self.render_software_updater_tab(ui, &pal),
                 ActiveTab::DriverUpdater => self.render_driver_updater_tab(ui, &pal),
@@ -2644,7 +2705,13 @@ impl RustCleanerApp {
     }
 
     fn render_uninstaller_tab(&mut self, ui: &mut egui::Ui, pal: &ThemePalette) {
+        if self.residual_summary.is_some() {
+            self.render_residual_inspector_view(ui, pal);
+            return;
+        }
+
         let s = self.language.strings();
+        let res = self.language.residual_hunter();
 
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
@@ -2671,6 +2738,32 @@ impl RustCleanerApp {
                     true,
                 ) {
                     self.installed_apps = list_installed_apps();
+                }
+
+                if draw_action_button(
+                    ui,
+                    pal,
+                    res.btn_global_orphans,
+                    VectorIcon::DiskRadar,
+                    ButtonVariant::PrimaryScan,
+                    true,
+                ) {
+                    let names: Vec<String> = self.installed_apps.iter().map(|a| a.display_name.clone()).collect();
+                    let items = crate::residual_hunter::scan_global_orphans(&names);
+                    let total_bytes: u64 = items.iter().map(|i| i.size_bytes).sum();
+                    let total_dirs = items.iter().filter(|i| matches!(i.kind, crate::residual_hunter::ResidualKind::Directory(_))).count();
+                    let total_files = items.iter().filter(|i| matches!(i.kind, crate::residual_hunter::ResidualKind::File(_))).count();
+                    self.residual_summary = Some(crate::residual_hunter::ResidualScanSummary {
+                        target_app_name: res.btn_global_orphans.to_string(),
+                        target_publisher: "System AppData & ProgramData".to_string(),
+                        items,
+                        total_bytes,
+                        total_dirs,
+                        total_files,
+                        total_registry_keys: 0,
+                    });
+                    self.is_global_orphan_mode = true;
+                    self.residual_status_msg = None;
                 }
             });
         });
@@ -2704,6 +2797,8 @@ impl RustCleanerApp {
         ui.add_space(8.0);
         let filter_low = self.uninstall_filter.to_lowercase();
         let mut launch_req: Option<InstalledApp> = None;
+        let mut residual_scan_req: Option<InstalledApp> = None;
+        let mut deep_uninstall_req: Option<InstalledApp> = None;
 
         let list_h = (ui.available_height() - 10.0).max(220.0);
         card_frame(pal).show(ui, |ui| {
@@ -2729,7 +2824,7 @@ impl RustCleanerApp {
                                     let row_w = ui.available_width();
                                     ui.set_width(row_w);
                                     ui.horizontal(|ui| {
-                                        let left_w = (row_w - 155.0).max(180.0);
+                                        let left_w = (row_w - 410.0).max(150.0);
                                         ui.allocate_ui_with_layout(
                                             egui::vec2(left_w, 38.0),
                                             egui::Layout::top_down(egui::Align::Min),
@@ -2804,10 +2899,32 @@ impl RustCleanerApp {
                                                     pal,
                                                     s.btn_uninstall,
                                                     VectorIcon::UninstallerBox,
-                                                    ButtonVariant::Danger,
+                                                    ButtonVariant::Secondary,
                                                     true,
                                                 ) {
                                                     launch_req = Some(app.clone());
+                                                }
+
+                                                if draw_action_button(
+                                                    ui,
+                                                    pal,
+                                                    res.btn_scan_residuals,
+                                                    VectorIcon::SearchLens,
+                                                    ButtonVariant::Secondary,
+                                                    true,
+                                                ) {
+                                                    residual_scan_req = Some(app.clone());
+                                                }
+
+                                                if draw_action_button(
+                                                    ui,
+                                                    pal,
+                                                    res.btn_deep_uninstall,
+                                                    VectorIcon::TrashDelete,
+                                                    ButtonVariant::Danger,
+                                                    true,
+                                                ) {
+                                                    deep_uninstall_req = Some(app.clone());
                                                 }
                                             },
                                         );
@@ -2823,6 +2940,710 @@ impl RustCleanerApp {
             match launch_uninstaller(&app) {
                 Ok(msg) => self.status_banner = msg,
                 Err(e) => self.status_banner = e,
+            }
+        }
+
+        if let Some(app) = residual_scan_req {
+            let summary = crate::residual_hunter::scan_application_residuals(
+                &app.display_name,
+                &app.publisher,
+                None,
+                &app.reg_key_name,
+            );
+            self.residual_summary = Some(summary);
+            self.is_global_orphan_mode = false;
+            self.residual_status_msg = None;
+        }
+
+        if let Some(app) = deep_uninstall_req {
+            let _ = launch_uninstaller(&app);
+            let summary = crate::residual_hunter::scan_application_residuals(
+                &app.display_name,
+                &app.publisher,
+                None,
+                &app.reg_key_name,
+            );
+            self.residual_summary = Some(summary);
+            self.is_global_orphan_mode = false;
+            self.residual_status_msg = Some(format!(
+                "Avviato disinstallatore standard. Esamina di seguito tutti i residui su disco e registro lasciati da '{}'.",
+                app.display_name
+            ));
+        }
+    }
+
+    fn render_residual_inspector_view(&mut self, ui: &mut egui::Ui, pal: &ThemePalette) {
+        let res = self.language.residual_hunter();
+        let s = self.language.strings();
+        let Some(summary) = &mut self.residual_summary else { return; };
+        let mut close_inspector = false;
+
+        // 1. Header with Back Button and Title
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(res.title_residual_hunter)
+                            .size(19.0)
+                            .strong()
+                            .color(pal.text_primary),
+                    );
+                    draw_pill_badge(
+                        ui,
+                        &summary.target_app_name,
+                        Color32::from_rgba_unmultiplied(
+                            pal.accent_purple.r(),
+                            pal.accent_purple.g(),
+                            pal.accent_purple.b(),
+                            32,
+                        ),
+                        pal.accent_purple,
+                    );
+                });
+                ui.label(
+                    RichText::new(res.sub_residual_hunter)
+                        .size(12.0)
+                        .color(pal.text_secondary),
+                );
+            });
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if draw_action_button(
+                    ui,
+                    pal,
+                    res.btn_back_to_apps,
+                    VectorIcon::RefreshSync,
+                    ButtonVariant::Secondary,
+                    true,
+                ) {
+                    close_inspector = true;
+                }
+            });
+        });
+
+        ui.add_space(8.0);
+
+        // 2. Status message banner if any
+        if let Some(msg) = &self.residual_status_msg {
+            let is_err = msg.contains("Impossibile") || msg.contains("Errore");
+            let banner_color = if is_err { pal.accent_rust } else { pal.accent_emerald };
+            egui::Frame::new()
+                .fill(Color32::from_rgba_unmultiplied(banner_color.r(), banner_color.g(), banner_color.b(), 24))
+                .stroke(Stroke::new(1.0, banner_color))
+                .corner_radius(CornerRadius::same(6))
+                .inner_margin(egui::Margin::symmetric(12, 8))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.label(RichText::new(msg).color(banner_color).strong());
+                });
+            ui.add_space(6.0);
+        }
+
+        // 3. KPI Cards
+        let selected_count = summary.items.iter().filter(|i| i.selected).count();
+        let selected_bytes: u64 = summary.items.iter().filter(|i| i.selected).map(|i| i.size_bytes).sum();
+        let reg_count = summary.items.iter().filter(|i| i.selected && matches!(i.kind, crate::residual_hunter::ResidualKind::RegistryKey { .. } | crate::residual_hunter::ResidualKind::RegistryValue { .. })).count();
+
+        ui.horizontal(|ui| {
+            let card_w = (ui.available_width() - 16.0) / 3.0;
+
+            // Card 1: Elementi Residui
+            card_frame(pal).show(ui, |ui| {
+                ui.set_width(card_w);
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(res.kpi_items_found).size(11.0).color(pal.text_muted).strong());
+                    ui.label(RichText::new(format!("{selected_count} / {}", summary.items.len())).size(20.0).color(pal.accent_cyan).strong());
+                });
+            });
+
+            // Card 2: Spazio Recuperabile
+            card_frame(pal).show(ui, |ui| {
+                ui.set_width(card_w);
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(res.kpi_space_reclaimable).size(11.0).color(pal.text_muted).strong());
+                    ui.label(RichText::new(crate::cleaner::format_bytes(selected_bytes)).size(20.0).color(pal.accent_emerald).strong());
+                });
+            });
+
+            // Card 3: Chiavi Registro
+            card_frame(pal).show(ui, |ui| {
+                ui.set_width(card_w);
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(res.kpi_reg_keys).size(11.0).color(pal.text_muted).strong());
+                    ui.label(RichText::new(format!("{reg_count}")).size(20.0).color(pal.accent_purple).strong());
+                });
+            });
+        });
+
+        ui.add_space(8.0);
+
+        // 4. Action bar with search filter, selection buttons, and Clean button
+        card_frame(pal).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(s.lbl_filter).color(pal.text_secondary));
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.residual_filter)
+                        .hint_text(res.filter_placeholder)
+                        .desired_width(220.0),
+                );
+
+                ui.separator();
+
+                if ui.button(res.btn_select_all).clicked() {
+                    for item in &mut summary.items {
+                        item.selected = true;
+                    }
+                }
+                if ui.button(res.btn_deselect_all).clicked() {
+                    for item in &mut summary.items {
+                        item.selected = false;
+                    }
+                }
+                if ui.button(res.btn_select_safe).clicked() {
+                    for item in &mut summary.items {
+                        item.selected = item.confidence == crate::residual_hunter::ConfidenceLevel::High;
+                    }
+                }
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let can_clean = selected_count > 0;
+                    if draw_action_button(
+                        ui,
+                        pal,
+                        res.btn_clean_selected,
+                        VectorIcon::TrashDelete,
+                        ButtonVariant::Danger,
+                        can_clean,
+                    ) {
+                        let backup_dir = env::current_dir()
+                            .unwrap_or_else(|_| PathBuf::from("."))
+                            .join("registry_backups");
+                        let report = crate::residual_hunter::delete_selected_residuals(&summary.items, &backup_dir);
+                        
+                        let backup_note = if let Some(p) = &report.reg_backup_path {
+                            format!(" | Backup .reg: {}", p.file_name().unwrap_or_default().to_string_lossy())
+                        } else {
+                            String::new()
+                        };
+
+                        self.residual_status_msg = Some(format!(
+                            "Eliminati {} elementi ({}) e {} chiavi di registro.{}",
+                            report.deleted_items,
+                            crate::cleaner::format_bytes(report.freed_bytes),
+                            report.deleted_reg_keys,
+                            backup_note
+                        ));
+
+                        // Remove deleted items from summary
+                        summary.items.retain(|i| !i.selected);
+                        summary.total_bytes = summary.items.iter().map(|i| i.size_bytes).sum();
+                    }
+                });
+            });
+        });
+
+        ui.add_space(8.0);
+
+        // 5. Residuals List
+        let filter_low = self.residual_filter.to_lowercase();
+        let list_h = (ui.available_height() - 10.0).max(200.0);
+
+        card_frame(pal).show(ui, |ui| {
+            ui.set_height(list_h);
+            if summary.items.is_empty() {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(30.0);
+                    ui.label(RichText::new(res.empty_title).size(16.0).strong().color(pal.text_primary));
+                    ui.add_space(4.0);
+                    ui.label(RichText::new(res.empty_desc).size(12.0).color(pal.text_secondary));
+                });
+            } else {
+                egui::ScrollArea::vertical()
+                    .id_salt("residual_inspector_scroll")
+                    .show(ui, |ui| {
+                        for item in summary.items.iter_mut() {
+                            if !filter_low.is_empty()
+                                && !item.display_path.to_lowercase().contains(&filter_low)
+                                && !item.reason.to_lowercase().contains(&filter_low)
+                            {
+                                continue;
+                            }
+
+                            ui.push_id(item.id, |ui| {
+                                egui::Frame::new()
+                                    .fill(pal.bg_card_subtle)
+                                    .stroke(Stroke::new(1.0, pal.border_subtle))
+                                    .corner_radius(CornerRadius::same(6))
+                                    .inner_margin(egui::Margin::symmetric(10, 8))
+                                    .show(ui, |ui| {
+                                        ui.horizontal(|ui| {
+                                            ui.checkbox(&mut item.selected, "");
+
+                                            // Kind Badge
+                                            match &item.kind {
+                                                crate::residual_hunter::ResidualKind::Directory(_) => {
+                                                    draw_pill_badge(ui, "CARTELLA", Color32::from_rgba_unmultiplied(pal.accent_cyan.r(), pal.accent_cyan.g(), pal.accent_cyan.b(), 32), pal.accent_cyan);
+                                                }
+                                                crate::residual_hunter::ResidualKind::File(_) => {
+                                                    draw_pill_badge(ui, "FILE", Color32::from_rgba_unmultiplied(pal.accent_amber.r(), pal.accent_amber.g(), pal.accent_amber.b(), 32), pal.accent_amber);
+                                                }
+                                                crate::residual_hunter::ResidualKind::RegistryKey { .. } | crate::residual_hunter::ResidualKind::RegistryValue { .. } => {
+                                                    draw_pill_badge(ui, "REGISTRO", Color32::from_rgba_unmultiplied(pal.accent_purple.r(), pal.accent_purple.g(), pal.accent_purple.b(), 32), pal.accent_purple);
+                                                }
+                                            }
+
+                                            // Size if file/dir
+                                            if item.size_bytes > 0 {
+                                                draw_pill_badge(ui, &crate::cleaner::format_bytes(item.size_bytes), Color32::from_rgba_unmultiplied(pal.accent_emerald.r(), pal.accent_emerald.g(), pal.accent_emerald.b(), 28), pal.accent_emerald);
+                                            }
+
+                                            // Confidence badge
+                                            let (conf_bg, conf_fg) = match item.confidence {
+                                                crate::residual_hunter::ConfidenceLevel::High => (pal.accent_emerald, pal.accent_emerald),
+                                                crate::residual_hunter::ConfidenceLevel::Medium => (pal.accent_amber, pal.accent_amber),
+                                                crate::residual_hunter::ConfidenceLevel::Low => (pal.text_muted, pal.text_muted),
+                                            };
+                                            draw_pill_badge(ui, item.confidence.label(), Color32::from_rgba_unmultiplied(conf_bg.r(), conf_bg.g(), conf_bg.b(), 28), conf_fg);
+
+                                            ui.vertical(|ui| {
+                                                ui.label(RichText::new(&item.display_path).size(12.0).monospace().strong().color(pal.text_primary));
+                                                ui.label(RichText::new(&item.reason).size(11.0).color(pal.text_secondary));
+                                            });
+                                        });
+                                    });
+                            });
+                            ui.add_space(4.0);
+                        }
+                    });
+            }
+        });
+
+        if close_inspector {
+            self.residual_summary = None;
+            self.residual_status_msg = None;
+        }
+    }
+
+    fn render_decrapifier_tab(&mut self, ui: &mut egui::Ui, pal: &ThemePalette) {
+        let dec = self.language.decrapifier();
+
+        // 1. Header with Title, Subtitle, and Global Action Buttons
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.label(
+                    RichText::new(dec.page_title)
+                        .size(19.0)
+                        .strong()
+                        .color(pal.text_primary),
+                );
+                ui.label(
+                    RichText::new(dec.page_subtitle)
+                        .size(12.0)
+                        .color(pal.text_secondary),
+                );
+            });
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // Restore Stock Defaults button
+                if draw_action_button(
+                    ui,
+                    pal,
+                    dec.btn_restore_defaults,
+                    VectorIcon::RefreshSync,
+                    ButtonVariant::Secondary,
+                    true,
+                ) {
+                    match crate::decrapifier::restore_all_windows_defaults() {
+                        Ok(count) => {
+                            self.decrap_status_msg = Some(format!("{} ({} impostazioni ripristinate)", dec.status_restored, count));
+                            self.decrap_tweaks_state = crate::decrapifier::REGISTRY_TWEAKS
+                                .iter()
+                                .map(|t| (t.id.to_string(), crate::decrapifier::is_tweak_active(t)))
+                                .collect();
+                        }
+                        Err(e) => {
+                            self.decrap_status_msg = Some(format!("Errore ripristino default: {e}"));
+                        }
+                    }
+                }
+
+                // Apply Recommended button
+                if draw_action_button(
+                    ui,
+                    pal,
+                    dec.btn_apply_recommended,
+                    VectorIcon::CheckShield,
+                    ButtonVariant::PrimaryScan,
+                    true,
+                ) {
+                    match crate::decrapifier::apply_all_recommended_tweaks() {
+                        Ok(count) => {
+                            self.decrap_status_msg = Some(format!("{} ({} ottimizzazioni attivate)", dec.status_applied, count));
+                            self.decrap_tweaks_state = crate::decrapifier::REGISTRY_TWEAKS
+                                .iter()
+                                .map(|t| (t.id.to_string(), crate::decrapifier::is_tweak_active(t)))
+                                .collect();
+                        }
+                        Err(e) => {
+                            self.decrap_status_msg = Some(format!("Errore applicazione tweak: {e}"));
+                        }
+                    }
+                }
+            });
+        });
+
+        ui.add_space(8.0);
+
+        // 2. Status message banner if any
+        if let Some(msg) = &self.decrap_status_msg {
+            let is_err = msg.contains("Impossibile") || msg.contains("Errore");
+            let banner_color = if is_err { pal.accent_rust } else { pal.accent_emerald };
+            egui::Frame::new()
+                .fill(Color32::from_rgba_unmultiplied(banner_color.r(), banner_color.g(), banner_color.b(), 24))
+                .stroke(Stroke::new(1.0, banner_color))
+                .corner_radius(CornerRadius::same(6))
+                .inner_margin(egui::Margin::symmetric(12, 8))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.label(RichText::new(msg).color(banner_color).strong());
+                });
+            ui.add_space(6.0);
+        }
+
+        // 3. KPI Cards
+        let active_count = self.decrap_tweaks_state.iter().filter(|(_, active)| *active).count();
+        let total_tweaks = crate::decrapifier::REGISTRY_TWEAKS.len();
+        let privacy_ratio = active_count as f32 / total_tweaks as f32;
+
+        ui.horizontal(|ui| {
+            let card_w = (ui.available_width() - 16.0) / 3.0;
+
+            // Card 1: Active Tweaks
+            card_frame(pal).show(ui, |ui| {
+                ui.set_width(card_w);
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(dec.kpi_tweaks_active).size(11.0).color(pal.text_muted).strong());
+                    ui.label(RichText::new(format!("{active_count} / {total_tweaks}")).size(20.0).color(pal.accent_cyan).strong());
+                });
+            });
+
+            // Card 2: Privacy Status
+            card_frame(pal).show(ui, |ui| {
+                ui.set_width(card_w);
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(dec.kpi_privacy_status).size(11.0).color(pal.text_muted).strong());
+                    let status_str = if privacy_ratio >= 0.8 {
+                        "MASSIMA (FORTEZZA)"
+                    } else if privacy_ratio >= 0.4 {
+                        "MODERATA"
+                    } else {
+                        "BASE (TELEMETRIA ATTIVA)"
+                    };
+                    let status_color = if privacy_ratio >= 0.8 {
+                        pal.accent_emerald
+                    } else if privacy_ratio >= 0.4 {
+                        pal.accent_amber
+                    } else {
+                        pal.accent_rust
+                    };
+                    ui.label(RichText::new(status_str).size(15.0).color(status_color).strong());
+                });
+            });
+
+            // Card 3: Bloatware Detected
+            card_frame(pal).show(ui, |ui| {
+                ui.set_width(card_w);
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(dec.kpi_bloatware_found).size(11.0).color(pal.text_muted).strong());
+                    let bloat_str = if self.decrap_appx_scanned {
+                        format!("{} rilevati", self.decrap_appx_packages.len())
+                    } else {
+                        "Non scansionato".to_string()
+                    };
+                    ui.label(RichText::new(bloat_str).size(16.0).color(pal.accent_purple).strong());
+                });
+            });
+        });
+
+        ui.add_space(8.0);
+
+        // 4. Subtab Switcher
+        card_frame(pal).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                let tweaks_active = self.decrap_subtab == DecrapSubtab::Tweaks;
+                if ui.selectable_label(tweaks_active, RichText::new(dec.tab_tweaks).strong()).clicked() {
+                    self.decrap_subtab = DecrapSubtab::Tweaks;
+                }
+
+                let appx_active = self.decrap_subtab == DecrapSubtab::Appx;
+                if ui.selectable_label(appx_active, RichText::new(dec.tab_appx).strong()).clicked() {
+                    self.decrap_subtab = DecrapSubtab::Appx;
+                    if !self.decrap_appx_scanned && !self.decrap_appx_busy {
+                        self.decrap_appx_busy = true;
+                        let rx = Arc::clone(&self.decrap_appx_rx);
+                        std::thread::spawn(move || {
+                            let pkgs = crate::decrapifier::scan_bloatware_packages();
+                            if let Ok(mut g) = rx.lock() {
+                                *g = Some(pkgs);
+                            }
+                        });
+                    }
+                }
+
+                ui.separator();
+
+                ui.label(RichText::new(self.language.strings().lbl_filter).color(pal.text_secondary));
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.decrap_filter)
+                        .hint_text("Cerca tweak o app...")
+                        .desired_width(200.0),
+                );
+            });
+        });
+
+        ui.add_space(8.0);
+        let filter_low = self.decrap_filter.to_lowercase();
+
+        // 5. Content View
+        match self.decrap_subtab {
+            DecrapSubtab::Tweaks => {
+                let list_h = (ui.available_height() - 10.0).max(220.0);
+                card_frame(pal).show(ui, |ui| {
+                    ui.set_height(list_h);
+                    egui::ScrollArea::vertical()
+                        .id_salt("decrap_tweaks_scroll")
+                        .show(ui, |ui| {
+                            let categories = [
+                                (crate::decrapifier::TweakCategory::PrivacyTelemetry, dec.cat_privacy),
+                                (crate::decrapifier::TweakCategory::StartAndExplorer, dec.cat_start),
+                                (crate::decrapifier::TweakCategory::SystemAndEdge, dec.cat_edge),
+                            ];
+
+                            for (cat, cat_name) in categories {
+                                let tweaks_in_cat: Vec<&crate::decrapifier::RegistryTweakDef> = crate::decrapifier::REGISTRY_TWEAKS
+                                    .iter()
+                                    .filter(|t| t.category == cat)
+                                    .collect();
+
+                                if tweaks_in_cat.is_empty() {
+                                    continue;
+                                }
+
+                                ui.label(
+                                    RichText::new(cat_name)
+                                        .size(13.5)
+                                        .strong()
+                                        .color(pal.accent_cyan),
+                                );
+                                ui.add_space(4.0);
+
+                                for tweak in tweaks_in_cat {
+                                    if !filter_low.is_empty()
+                                        && !tweak.name_it.to_lowercase().contains(&filter_low)
+                                        && !tweak.desc_it.to_lowercase().contains(&filter_low)
+                                    {
+                                        continue;
+                                    }
+
+                                    let mut is_active = self
+                                        .decrap_tweaks_state
+                                        .iter()
+                                        .find(|(id, _)| id == tweak.id)
+                                        .map(|(_, a)| *a)
+                                        .unwrap_or(false);
+
+                                    ui.push_id(tweak.id, |ui| {
+                                        egui::Frame::new()
+                                            .fill(pal.bg_card_subtle)
+                                            .stroke(Stroke::new(1.0, pal.border_subtle))
+                                            .corner_radius(CornerRadius::same(6))
+                                            .inner_margin(egui::Margin::symmetric(12, 9))
+                                            .show(ui, |ui| {
+                                                ui.horizontal(|ui| {
+                                                    let toggle_resp = ui.checkbox(&mut is_active, "");
+                                                    if toggle_resp.changed() {
+                                                        if is_active {
+                                                            let _ = crate::decrapifier::apply_tweak(tweak);
+                                                        } else {
+                                                            let _ = crate::decrapifier::revert_tweak(tweak);
+                                                        }
+                                                        if let Some(entry) = self.decrap_tweaks_state.iter_mut().find(|(id, _)| id == tweak.id) {
+                                                            entry.1 = is_active;
+                                                        }
+                                                    }
+
+                                                    ui.vertical(|ui| {
+                                                        ui.horizontal(|ui| {
+                                                            ui.label(
+                                                                RichText::new(tweak.name_it)
+                                                                    .size(13.5)
+                                                                    .strong()
+                                                                    .color(pal.text_primary),
+                                                            );
+
+                                                            if tweak.recommended {
+                                                                draw_pill_badge(
+                                                                    ui,
+                                                                    dec.badge_recommended,
+                                                                    Color32::from_rgba_unmultiplied(
+                                                                        pal.accent_emerald.r(),
+                                                                        pal.accent_emerald.g(),
+                                                                        pal.accent_emerald.b(),
+                                                                        28,
+                                                                    ),
+                                                                    pal.accent_emerald,
+                                                                );
+                                                            }
+
+                                                            if is_active {
+                                                                draw_pill_badge(
+                                                                    ui,
+                                                                    dec.badge_active,
+                                                                    Color32::from_rgba_unmultiplied(
+                                                                        pal.accent_cyan.r(),
+                                                                        pal.accent_cyan.g(),
+                                                                        pal.accent_cyan.b(),
+                                                                        28,
+                                                                    ),
+                                                                    pal.accent_cyan,
+                                                                );
+                                                            } else {
+                                                                draw_pill_badge(
+                                                                    ui,
+                                                                    dec.badge_default,
+                                                                    Color32::from_rgba_unmultiplied(
+                                                                        pal.text_muted.r(),
+                                                                        pal.text_muted.g(),
+                                                                        pal.text_muted.b(),
+                                                                        20,
+                                                                    ),
+                                                                    pal.text_muted,
+                                                                );
+                                                            }
+                                                        });
+
+                                                        ui.label(
+                                                            RichText::new(tweak.desc_it)
+                                                                .size(11.5)
+                                                                .color(pal.text_secondary),
+                                                        );
+                                                    });
+                                                });
+                                            });
+                                    });
+                                    ui.add_space(4.0);
+                                }
+                                ui.add_space(8.0);
+                            }
+                        });
+                });
+            }
+            DecrapSubtab::Appx => {
+                let list_h = (ui.available_height() - 10.0).max(220.0);
+                card_frame(pal).show(ui, |ui| {
+                    ui.set_height(list_h);
+                    if self.decrap_appx_busy {
+                        ui.vertical_centered(|ui| {
+                            ui.add_space(40.0);
+                            ui.spinner();
+                            ui.add_space(10.0);
+                            ui.label(RichText::new("Scansione pacchetti AppX preinstallati in corso...").color(pal.text_secondary));
+                        });
+                    } else if !self.decrap_appx_scanned {
+                        ui.vertical_centered(|ui| {
+                            ui.add_space(40.0);
+                            ui.label(RichText::new("Scansione Bloatware AppX non ancora avviata.").size(15.0).strong().color(pal.text_primary));
+                            ui.add_space(10.0);
+                            if draw_action_button(
+                                ui,
+                                pal,
+                                dec.btn_scan_appx,
+                                VectorIcon::SearchLens,
+                                ButtonVariant::PrimaryScan,
+                                true,
+                            ) {
+                                self.decrap_appx_busy = true;
+                                let rx = Arc::clone(&self.decrap_appx_rx);
+                                std::thread::spawn(move || {
+                                    let pkgs = crate::decrapifier::scan_bloatware_packages();
+                                    if let Ok(mut g) = rx.lock() {
+                                        *g = Some(pkgs);
+                                    }
+                                });
+                            }
+                        });
+                    } else if self.decrap_appx_packages.is_empty() {
+                        ui.vertical_centered(|ui| {
+                            ui.add_space(40.0);
+                            ui.label(RichText::new("Nessun bloatware AppX rilevato! Il sistema è pulito.").size(15.0).strong().color(pal.accent_emerald));
+                        });
+                    } else {
+                        ui.horizontal(|ui| {
+                            let selected_count = self.decrap_appx_packages.iter().filter(|p| p.selected).count();
+                            ui.label(RichText::new(format!("Pacchetti rilevati: {} (selezionati: {selected_count})", self.decrap_appx_packages.len())).strong().color(pal.text_primary));
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if draw_action_button(
+                                    ui,
+                                    pal,
+                                    dec.btn_remove_selected_appx,
+                                    VectorIcon::TrashDelete,
+                                    ButtonVariant::Danger,
+                                    selected_count > 0,
+                                ) {
+                                    let mut removed_count = 0;
+                                    let mut errors = Vec::new();
+                                    for pkg in self.decrap_appx_packages.iter().filter(|p| p.selected) {
+                                        match crate::decrapifier::remove_appx_package(&pkg.package_full_name) {
+                                            Ok(()) => removed_count += 1,
+                                            Err(e) => errors.push(e),
+                                        }
+                                    }
+                                    self.decrap_appx_packages.retain(|p| !p.selected);
+                                    if errors.is_empty() {
+                                        self.decrap_status_msg = Some(format!("Disinstallati con successo {removed_count} pacchetti AppX bloatware!"));
+                                    } else {
+                                        self.decrap_status_msg = Some(format!("Disinstallati {removed_count} pacchetti. Errori su alcuni pacchetti: {:?}", errors));
+                                    }
+                                }
+                            });
+                        });
+
+                        ui.add_space(6.0);
+                        egui::ScrollArea::vertical()
+                            .id_salt("decrap_appx_scroll")
+                            .show(ui, |ui| {
+                                for (idx, pkg) in self.decrap_appx_packages.iter_mut().enumerate() {
+                                    if !filter_low.is_empty()
+                                        && !pkg.display_name.to_lowercase().contains(&filter_low)
+                                        && !pkg.name.to_lowercase().contains(&filter_low)
+                                    {
+                                        continue;
+                                    }
+
+                                    ui.push_id(idx, |ui| {
+                                        egui::Frame::new()
+                                            .fill(pal.bg_card_subtle)
+                                            .stroke(Stroke::new(1.0, pal.border_subtle))
+                                            .corner_radius(CornerRadius::same(6))
+                                            .inner_margin(egui::Margin::symmetric(10, 8))
+                                            .show(ui, |ui| {
+                                                ui.horizontal(|ui| {
+                                                    ui.checkbox(&mut pkg.selected, "");
+                                                    draw_pill_badge(ui, "APPX", Color32::from_rgba_unmultiplied(pal.accent_purple.r(), pal.accent_purple.g(), pal.accent_purple.b(), 28), pal.accent_purple);
+                                                    ui.vertical(|ui| {
+                                                        ui.label(RichText::new(&pkg.display_name).size(13.0).strong().color(pal.text_primary));
+                                                        ui.label(RichText::new(&pkg.name).size(11.0).monospace().color(pal.text_secondary));
+                                                    });
+                                                });
+                                            });
+                                    });
+                                    ui.add_space(4.0);
+                                }
+                            });
+                    }
+                });
             }
         }
     }

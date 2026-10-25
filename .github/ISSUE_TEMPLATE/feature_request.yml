@@ -1,0 +1,28 @@
+name: 💡 Feature Request
+description: Proponi una nuova funzionalità, ottimizzazione o pulizia aggiuntiva
+title: "[FEATURE]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Grazie per il tuo contributo allo sviluppo di RustCleaner!
+  - type: textarea
+    id: problem
+    attributes:
+      label: Quale problema risolve questa feature?
+      description: Una spiegazione chiara e concisa di ciò che manca o potrebbe essere migliorato.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Soluzione proposta
+      description: Descrivi in dettaglio come vorresti che funzionasse questa funzionalità.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternative considerate
+      description: Hai valutato altre soluzioni o approcci alternativi?
