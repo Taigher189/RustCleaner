@@ -62,8 +62,8 @@ fn tier1_cli_version_flag_displays_correct_semver() {
     assert!(out.status.success(), "Exit code must be 0 for --version");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains("rustcleaner") && stdout.contains("1.3.0"),
-        "Stdout should contain app name and 1.3.0 semver"
+        stdout.contains("rustcleaner") && stdout.contains(env!("CARGO_PKG_VERSION")),
+        "Stdout should contain app name and current package semver, got: {stdout}"
     );
 }
 
