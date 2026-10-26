@@ -1,7 +1,5 @@
 <div align="center">
 
-# 🦀 RustCleaner
-
 <img src="assets/hero_banner.png" alt="RustCleaner Hero Banner" width="100%" />
 
 <br/>
@@ -12,7 +10,7 @@
 [![Privacy](https://img.shields.io/badge/Privacy-Zero%20Telemetry%20%E2%80%A2%20100%25%20Offline-10B981?style=for-the-badge&logo=shield&logoColor=white)](#)
 [![Performance](https://img.shields.io/badge/Memory-0%20MB%20Idle%20RAM-8B5CF6?style=for-the-badge&logo=speedtest&logoColor=white)](#)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
-
+</div>
 <br/>
 
 **The modern, blazing fast, zero-telemetry, single-binary Windows system optimizer, deep residual cleaner, Windows 11 privacy fortress, and disk sanitizer written in pure Rust.**
