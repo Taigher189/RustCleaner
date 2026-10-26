@@ -329,52 +329,121 @@ def create_decrapifier_screenshot():
 # ----------------------------------------------------------------------------
 def create_hero_banner():
     BW, BH = 1200, 480
-    img = Image.new("RGB", (BW, BH), BG_CANVAS)
+    img = Image.new("RGBA", (BW, BH), BG_CANVAS + (255,))
+    
+    # 1. Subtle smooth radial mesh glow at the center-top (RGBA composited)
+    glow_layer = Image.new("RGBA", (BW, BH), (0, 0, 0, 0))
+    glow_draw = ImageDraw.Draw(glow_layer)
+    center_x, center_y = BW // 2, 70
+    max_radius = 280
+    for r in range(max_radius, 0, -6):
+        alpha = int(22 * ((1 - r / max_radius) ** 2))
+        glow_draw.ellipse(
+            [center_x - r * 2, center_y - r, center_x + r * 2, center_y + r],
+            fill=(234, 88, 12, alpha)
+        )
+    img = Image.alpha_composite(img, glow_layer)
     draw = ImageDraw.Draw(img)
 
-    # Ambient glow
-    for r in range(120, 0, -5):
-        draw.ellipse([BW//2 - r*4, -r*2, BW//2 + r*4, r*2], fill=(234, 88, 12, int(8 * (1 - r/120))))
+    # 2. Modern Central Logo Badge (Dark Glass Hexagon / Squircle)
+    lw, lh = 72, 72
+    lx = (BW - lw) // 2
+    ly = 32
+    draw.rounded_rectangle([lx, ly, lx + lw, ly + lh], radius=18, fill=(18, 24, 38), outline=ACCENT_RUST, width=2)
+    
+    # Stylized clean Crab / Core geometric icon inside logo badge
+    # Draw Rust cleaner stylized symbol
+    cx, cy = lx + lw // 2, ly + lh // 2
+    draw.ellipse([cx - 16, cy - 12, cx + 16, cy + 12], fill=ACCENT_RUST)
+    draw.arc([cx - 24, cy - 18, cx - 12, cy - 6], start=180, end=340, fill=ACCENT_RUST, width=3)
+    draw.arc([cx + 12, cy - 18, cx + 24, cy - 6], start=200, end=360, fill=ACCENT_RUST, width=3)
+    draw.line([cx - 18, cy + 6, cx - 26, cy + 14], fill=ACCENT_RUST, width=2)
+    draw.line([cx - 12, cy + 10, cx - 18, cy + 20], fill=ACCENT_RUST, width=2)
+    draw.line([cx + 18, cy + 6, cx + 26, cy + 14], fill=ACCENT_RUST, width=2)
+    draw.line([cx + 12, cy + 10, cx + 18, cy + 20], fill=ACCENT_RUST, width=2)
+    draw.ellipse([cx - 7, cy - 6, cx - 3, cy - 2], fill=(255, 255, 255))
+    draw.ellipse([cx + 3, cy - 6, cx + 7, cy - 2], fill=(255, 255, 255))
 
-    # Logo & Badge
-    draw.rounded_rectangle([BW//2 - 40, 40, BW//2 + 40, 120], radius=16, fill=ACCENT_RUST)
-    draw.text((BW//2 - 24, 46), "RC", fill=(255, 255, 255), font=FONT_HERO_TITLE)
+    # 3. Main Title & Subtitle
+    title_text = "RustCleaner"
+    bbox_title = FONT_HERO_TITLE.getbbox(title_text)
+    tw = bbox_title[2] - bbox_title[0]
+    draw.text(((BW - tw) // 2, 120), title_text, fill=TEXT_PRIMARY, font=FONT_HERO_TITLE)
 
-    # Title
-    draw.text((BW//2 - 160, 140), "RustCleaner", fill=TEXT_PRIMARY, font=FONT_HERO_TITLE)
-    draw.text((BW//2 - 320, 205), "Zero-Telemetry, High-Performance Windows Optimizer in Pure Rust", fill=TEXT_SECONDARY, font=FONT_HERO_SUB)
+    sub_text = "Zero-Telemetry, High-Performance Windows System Optimizer & Privacy Suite"
+    bbox_sub = FONT_HERO_SUB.getbbox(sub_text)
+    sw = bbox_sub[2] - bbox_sub[0]
+    draw.text(((BW - sw) // 2, 185), sub_text, fill=TEXT_SECONDARY, font=FONT_HERO_SUB)
 
-    # Feature Badges
+    # 4. Feature Badges (Pills)
     pills = [
-        ("⚡ 100% Pure Rust", ACCENT_RUST),
-        ("🛡️ Zero Telemetry", ACCENT_EMERALD),
-        ("🧠 0 MB Background RAM", ACCENT_CYAN),
-        ("📦 Single Portable EXE (+crt-static)", ACCENT_PURPLE),
-        ("🌐 7 Languages", ACCENT_AMBER),
+        ("100% Pure Rust", ACCENT_RUST),
+        ("Zero Telemetry", ACCENT_EMERALD),
+        ("0 MB Background RAM", ACCENT_CYAN),
+        ("Single Portable EXE", ACCENT_PURPLE),
+        ("7 Languages Built-In", ACCENT_AMBER),
     ]
 
-    total_w = sum(len(text) * 8 + 30 for text, _ in pills)
-    cur_x = (BW - total_w) // 2
+    # Pre-calculate pill widths to center horizontally
+    pill_widths = []
     for text, col in pills:
-        pw = draw_pill(draw, cur_x, 260, text, col, (col[0], col[1], col[2], 30), font=FONT_BODY_BOLD)
+        bbox = FONT_PILL.getbbox(text)
+        pill_widths.append((bbox[2] - bbox[0]) + 18 + 14)
+    total_w = sum(pill_widths) + (len(pills) - 1) * 12
+    cur_x = (BW - total_w) // 2
+
+    for (text, col), pw in zip(pills, pill_widths):
+        draw_pill(draw, cur_x, 235, text, col, font=FONT_PILL)
         cur_x += pw + 12
 
-    # Highlights Row
-    boxes = [
-        ("Deep Residual Hunter", "Nukes leftovers from uninstalled apps (Revo killer)."),
-        ("SHA-256 Duplicate Finder", "3-stage zero-waste parallel duplicate detector."),
-        ("Windows 11 Decrapifier", "Strips Bing search, Cortana & MSN widgets safely."),
-        ("Clean Registry (.reg Backup)", "Instant rollback backup before deleting orphaned keys."),
+    # 5. Bento Grid Cards (Bottom Row - 4 Key Capabilities)
+    cards = [
+        ("Deep Residual Hunter", "Elimina chiavi e cartelle residue dopo la disinstallazione (Revo killer).", ACCENT_RUST),
+        ("SHA-256 Duplicate Hunter", "Rilevamento duplicati a 3 stadi ad alte prestazioni.", ACCENT_CYAN),
+        ("Windows 11 Privacy Fortress", "Blocca telemetria, Bing nel menu Start e bloatware AppX.", ACCENT_EMERALD),
+        ("Registro Sicuro con Backup", "Rollback automatico .reg obbligatorio prima di ogni modifica.", ACCENT_PURPLE),
     ]
 
-    bx = 40
-    for b_title, b_desc in boxes:
-        draw.rounded_rectangle([bx, 320, bx + 265, 430], radius=10, fill=BG_CARD, outline=BORDER_SUBTLE, width=1)
-        draw.text((bx + 14, 335), b_title, fill=ACCENT_CYAN, font=FONT_BODY_BOLD)
-        draw.text((bx + 14, 365), b_desc, fill=TEXT_SECONDARY, font=FONT_SMALL)
-        bx += 285
+    card_w = 266
+    card_h = 130
+    spacing = 16
+    start_x = (BW - (4 * card_w + 3 * spacing)) // 2
+    card_y = 305
 
-    return img
+    for i, (c_title, c_desc, c_color) in enumerate(cards):
+        cx = start_x + i * (card_w + spacing)
+        # Card Body
+        draw.rounded_rectangle([cx, card_y, cx + card_w, card_y + card_h], radius=10, fill=BG_CARD, outline=BG_CARD_BORDER, width=1)
+        # Top glowing accent line (3px rounded strip)
+        draw.rounded_rectangle([cx + 10, card_y, cx + card_w - 10, card_y + 3], radius=2, fill=c_color)
+        
+        # Category indicator circle
+        draw.ellipse([cx + 16, card_y + 20, cx + 24, card_y + 28], fill=c_color)
+        draw.text((cx + 32, card_y + 17), c_title, fill=TEXT_PRIMARY, font=FONT_CARD_TITLE)
+
+        # Multi-line description wrap
+        words = c_desc.split(" ")
+        lines = []
+        cur_line = ""
+        for word in words:
+            test_line = (cur_line + " " + word).strip()
+            if len(test_line) * 7 > (card_w - 32):
+                lines.append(cur_line)
+                cur_line = word
+            else:
+                cur_line = test_line
+        if cur_line:
+            lines.append(cur_line)
+
+        dy = card_y + 50
+        for line in lines:
+            draw.text((cx + 16, dy), line, fill=TEXT_SECONDARY, font=FONT_CARD_DESC)
+            dy += 18
+
+    # Convert back to RGB for crisp, compatible PNG
+    final_rgb = Image.new("RGB", (BW, BH), BG_CANVAS)
+    final_rgb.paste(img, (0, 0), img)
+    return final_rgb
 
 if __name__ == "__main__":
     print("Generating assets...")
