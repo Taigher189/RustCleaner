@@ -1091,7 +1091,8 @@ mod tests {
         assert!(is_protected_system_path(Path::new(r"C:\Windows\bootmgr")));
         assert!(is_protected_system_path(Path::new(r"D:\MyProject\.git\config")));
         // Current repo itself
-        assert!(is_protected_system_path(Path::new(r"d:\Repo\RustCleaner\src\main.rs")));
+        let cur_repo = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        assert!(is_protected_system_path(&cur_repo.join("src").join("main.rs")));
     }
 
     #[test]
