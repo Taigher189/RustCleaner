@@ -1,11 +1,3 @@
-<div align="center">
-
-# 🦀 RustCleaner
-
-<img src="assets/hero_banner.png" alt="RustCleaner Hero Banner" width="100%" />
-
-<br/>
-
 [![GitHub Release](https://img.shields.io/github/v/release/Taigher189/RustCleaner?style=for-the-badge&color=e05d44&label=Latest%20Release)](https://github.com/Taigher189/RustCleaner/releases)
 [![Rust](https://img.shields.io/badge/Language-Rust%202021-DEA584?style=for-the-badge&logo=rust&logoColor=black)](https://www.rust-lang.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(x64)-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://microsoft.com/windows)
