@@ -3466,18 +3466,31 @@ impl RustCleanerApp {
                     ButtonVariant::PrimaryScan,
                     true,
                 ) {
-                    match crate::decrapifier::apply_all_recommended_tweaks() {
-                        Ok(count) => {
-                            self.decrap_status_msg = Some(format!("{} ({} ottimizzazioni attivate)", dec.status_applied, count));
-                            self.decrap_tweaks_state = crate::decrapifier::REGISTRY_TWEAKS
-                                .iter()
-                                .map(|t| (t.id.to_string(), crate::decrapifier::is_tweak_active(t)))
-                                .collect();
-                        }
-                        Err(e) => {
-                            self.decrap_status_msg = Some(format!("Errore applicazione tweak: {e}"));
+                    let res = crate::decrapifier::apply_all_recommended_tweaks();
+                    let total_active = res.applied_count + res.already_active_count;
+                    if res.failed_tweaks.is_empty() {
+                        self.decrap_status_msg = Some(format!(
+                            "{} ({} ottimizzazioni attive su {})",
+                            dec.status_applied, total_active, crate::decrapifier::REGISTRY_TWEAKS.len()
+                        ));
+                    } else {
+                        let needs_admin = res.failed_tweaks.iter().any(|(_, e)| e.contains("Amministratore") || e.contains("negato"));
+                        if needs_admin && !self.is_admin {
+                            self.decrap_status_msg = Some(format!(
+                                "Applicate {} ottimizzazioni. I restanti {} tweak di sistema HKLM richiedono l'avvio come Amministratore.",
+                                total_active, res.failed_tweaks.len()
+                            ));
+                        } else {
+                            self.decrap_status_msg = Some(format!(
+                                "Applicate {} ottimizzazioni ({} non applicate: {})",
+                                total_active, res.failed_tweaks.len(), res.failed_tweaks[0].1
+                            ));
                         }
                     }
+                    self.decrap_tweaks_state = crate::decrapifier::REGISTRY_TWEAKS
+                        .iter()
+                        .map(|t| (t.id.to_string(), crate::decrapifier::is_tweak_active(t)))
+                        .collect();
                 }
             });
         });
@@ -3654,12 +3667,18 @@ impl RustCleanerApp {
                                                     let toggle_resp = ui.checkbox(&mut is_active, "");
                                                     if toggle_resp.changed() {
                                                         if is_active {
-                                                            let _ = crate::decrapifier::apply_tweak(tweak);
+                                                            if let Err(e) = crate::decrapifier::apply_tweak(tweak) {
+                                                                self.decrap_status_msg = Some(format!("Attenzione: {e}"));
+                                                            } else {
+                                                                self.decrap_status_msg = Some(format!("Tweak '{}' attivato.", tweak.name_it));
+                                                            }
                                                         } else {
                                                             let _ = crate::decrapifier::revert_tweak(tweak);
+                                                            self.decrap_status_msg = Some(format!("Ripristinato valore predefinito per '{}'.", tweak.name_it));
                                                         }
+                                                        let actual = crate::decrapifier::is_tweak_active(tweak);
                                                         if let Some(entry) = self.decrap_tweaks_state.iter_mut().find(|(id, _)| id == tweak.id) {
-                                                            entry.1 = is_active;
+                                                            entry.1 = actual;
                                                         }
                                                     }
 

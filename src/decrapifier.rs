@@ -247,15 +247,36 @@ pub fn is_tweak_active(tweak: &RegistryTweakDef) -> bool {
 
 /// Applies a registry tweak (enabling the privacy / debloat optimization).
 pub fn apply_tweak(tweak: &RegistryTweakDef) -> Result<(), String> {
+    // If the tweak is already in the debloated state, return Ok immediately (idempotent & safe)
+    if is_tweak_active(tweak) {
+        return Ok(());
+    }
+
     let root = tweak.hive.open_root();
     let (key, _) = root
         .create_subkey(tweak.subkey)
-        .map_err(|e| format!("Impossibile creare/aprire chiave '{}': {e}", tweak.subkey))?;
+        .map_err(|e| {
+            if tweak.hive == RegHive::Hklm {
+                format!("Accesso negato alla chiave HKLM '{}'. Avvia come Amministratore.", tweak.subkey)
+            } else {
+                format!("Impossibile creare/aprire chiave '{}': {e}", tweak.subkey)
+            }
+        })?;
 
-    key.set_value(tweak.value_name, &tweak.debloat_val)
-        .map_err(|e| format!("Impossibile impostare valore '{}': {e}", tweak.value_name))?;
-
-    Ok(())
+    match key.set_value(tweak.value_name, &tweak.debloat_val) {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            // Re-check: did the value take effect or is it protected?
+            if is_tweak_active(tweak) {
+                return Ok(());
+            }
+            if tweak.hive == RegHive::Hklm {
+                Err(format!("Accesso negato a HKLM '{}'. Richiede privilegi di Amministratore.", tweak.value_name))
+            } else {
+                Err(format!("Impossibile impostare valore '{}': {e}", tweak.value_name))
+            }
+        }
+    }
 }
 
 /// Reverts a registry tweak back to default Windows factory behavior (1-Click Rollback).
@@ -324,16 +345,38 @@ pub fn remove_appx_package(package_full_name: &str) -> Result<(), String> {
     }
 }
 
+/// Result summary of batch tweak application.
+#[derive(Debug, Clone, Default)]
+pub struct BatchTweakResult {
+    pub applied_count: usize,
+    pub already_active_count: usize,
+    pub failed_tweaks: Vec<(String, String)>,
+}
+
 /// Applies all recommended privacy and debloat tweaks in one operation.
-pub fn apply_all_recommended_tweaks() -> Result<usize, String> {
-    let mut count = 0;
+pub fn apply_all_recommended_tweaks() -> BatchTweakResult {
+    let mut applied_count = 0;
+    let mut already_active_count = 0;
+    let mut failed_tweaks = Vec::new();
+
     for tweak in REGISTRY_TWEAKS {
         if tweak.recommended {
-            apply_tweak(tweak)?;
-            count += 1;
+            if is_tweak_active(tweak) {
+                already_active_count += 1;
+                continue;
+            }
+            match apply_tweak(tweak) {
+                Ok(_) => applied_count += 1,
+                Err(err) => failed_tweaks.push((tweak.id.to_string(), err)),
+            }
         }
     }
-    Ok(count)
+
+    BatchTweakResult {
+        applied_count,
+        already_active_count,
+        failed_tweaks,
+    }
 }
 
 /// Rolls back all tweaks to factory Windows stock defaults (1-Click Safe Rollback).
