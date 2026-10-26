@@ -1,4 +1,5 @@
 //! 4. Monitoraggio in Tempo Reale a Zero Polling (`notify` crate + `ReadDirectoryChangesW`)
+//!
 //! Sleeps at the Windows kernel level (0% CPU polling overhead) and wakes up only when the OS
 //! filesystem driver emits an event in `%TEMP%` or browser session/lock directories.
 

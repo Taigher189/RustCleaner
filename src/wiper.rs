@@ -11,8 +11,8 @@ use std::fs::{self, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::fs::OpenOptionsExt;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use windows_sys::Win32::Storage::FileSystem::{
@@ -115,6 +115,7 @@ pub struct WipeProgress {
     pub speed_mb_per_sec: f64,
     pub status_message: String,
     pub error: Option<String>,
+    pub container_dir: Option<PathBuf>,
 }
 
 /// RAII Guard that guarantees removal of the temporary wipe directory even on panic or early cancellation.
@@ -127,6 +128,8 @@ impl Drop for WipeCleanupGuard {
         let _ = fs::remove_dir_all(&self.dir_path);
     }
 }
+
+static WIPER_SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 /// Fills `buf` according to the pass index (0-based) and selected `WipeAlgorithm`.
 fn fill_buffer_for_pass(buf: &mut [u8], algorithm: WipeAlgorithm, pass_idx: u32) {
@@ -146,7 +149,7 @@ fn fill_buffer_for_pass(buf: &mut [u8], algorithm: WipeAlgorithm, pass_idx: u32)
             _ => rand::thread_rng().fill_bytes(buf),
         },
         WipeAlgorithm::GutmannThirtyFivePass => {
-            if pass_idx < 4 || pass_idx >= 31 {
+            if !(4..31).contains(&pass_idx) {
                 rand::thread_rng().fill_bytes(buf);
             } else {
                 let pat_byte = match pass_idx % 6 {
@@ -163,6 +166,57 @@ fn fill_buffer_for_pass(buf: &mut [u8], algorithm: WipeAlgorithm, pass_idx: u32)
     }
 }
 
+/// Validates that `drive_root` is a legitimate logical drive root (e.g. `C:\` or `D:\`).
+/// Rejects physical drive device paths (`\\.\PhysicalDriveX`), volume GUIDs, or arbitrary subdirectories.
+pub fn validate_wipe_drive_root(drive_root: &str) -> Result<PathBuf, String> {
+    let trimmed = drive_root.trim();
+    if trimmed.is_empty() {
+        return Err("Percorso unità vuoto.".to_string());
+    }
+
+    // Explicitly reject raw volume or physical disk device paths
+    let lower = trimmed.to_lowercase();
+    if lower.starts_with(r"\\.\")
+        || lower.starts_with(r"\\?\")
+        || lower.starts_with(r"\??\")
+        || lower.contains("physicaldrive")
+        || lower.contains("volume{")
+    {
+        return Err(format!(
+            "Accesso negato: percorsi fisici o volume raw ('{trimmed}') non consentiti per la bonifica."
+        ));
+    }
+
+    // Must be a drive root: e.g. "C:\" or "C:"
+    let bytes = trimmed.as_bytes();
+    if !(bytes.len() == 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
+        && !(bytes.len() == 3
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && (bytes[2] == b'\\' || bytes[2] == b'/'))
+    {
+        return Err(format!(
+            "Percorso non valido: '{trimmed}' non è una radice di unità logica (es. 'C:\\')."
+        ));
+    }
+
+    let letter = (bytes[0] as char).to_ascii_uppercase();
+    let canonical = format!("{letter}:\\");
+    let canonical_path = PathBuf::from(&canonical);
+
+    let drives = list_drives();
+    if !drives
+        .iter()
+        .any(|d| d.root_path.eq_ignore_ascii_case(&canonical))
+    {
+        return Err(format!(
+            "Unità logica '{canonical}' non trovata tra i volumi attivi del sistema."
+        ));
+    }
+
+    Ok(canonical_path)
+}
+
 /// Wipes unallocated disk space on `drive_root` (e.g. `"C:\\"`).
 /// - Uses `FILE_FLAG_WRITE_THROUGH` (`0x80000000`) to bypass the OS write cache and flush directly to storage.
 /// - Optionally wipes MFT free records (`wipe_mft_slack`), matching `N_EX_WIPE_MFT_FREE_SPACE`.
@@ -176,8 +230,13 @@ pub fn wipe_free_space(
     progress: Arc<Mutex<WipeProgress>>,
     cancel_flag: Arc<AtomicBool>,
 ) -> Result<u64, String> {
-    let root_path = Path::new(drive_root);
-    let container_dir = root_path.join(".rustcleaner_wipe_tmp");
+    let root_path = validate_wipe_drive_root(drive_root)?;
+    let session_id = WIPER_SESSION_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let container_dir = root_path.join(format!(
+        "_rustcleaner_wipe_{}_{}.tmp",
+        std::process::id(),
+        session_id
+    ));
     fs::create_dir_all(&container_dir).map_err(|e| {
         format!(
             "Impossibile creare la cartella temporanea di bonifica in '{}': {e}",
@@ -210,23 +269,36 @@ pub fn wipe_free_space(
 
     let total_passes = algorithm.passes();
     {
-        let mut p = progress.lock().unwrap();
-        p.running = true;
-        p.finished = false;
-        p.current_pass = 1;
-        p.total_passes = total_passes;
-        p.bytes_written_in_pass = 0;
-        p.target_bytes_per_pass = target_bytes;
-        p.status_message = format!("Inizializzazione bonifica su {drive_root}...");
-        p.error = None;
+        if let Ok(mut p) = progress.lock() {
+            p.running = true;
+            p.finished = false;
+            p.current_pass = 1;
+            p.total_passes = total_passes;
+            p.bytes_written_in_pass = 0;
+            p.target_bytes_per_pass = target_bytes;
+            p.status_message = format!("Inizializzazione bonifica su {drive_root}...");
+            p.error = None;
+            p.container_dir = Some(container_dir.clone());
+        }
+    }
+
+    if cancel_flag.load(Ordering::Relaxed) {
+        if let Ok(mut p) = progress.lock() {
+            p.running = false;
+            p.finished = true;
+            p.status_message =
+                "Bonifica annullata dall'utente. Spazio temporaneo rilasciato.".to_string();
+        }
+        return Ok(0);
     }
 
     // Optional Phase 1: Wipe MFT Free Records (`N_EX_WIPE_MFT_FREE_SPACE` @ 0x19e9fb8)
     if wipe_mft_slack {
         {
-            let mut p = progress.lock().unwrap();
-            p.status_message =
-                "Bonifica record MFT liberi (N_EX_WIPE_MFT_FREE_SPACE)...".to_string();
+            if let Ok(mut p) = progress.lock() {
+                p.status_message =
+                    "Bonifica record MFT liberi (N_EX_WIPE_MFT_FREE_SPACE)...".to_string();
+            }
         }
         let mft_dir = container_dir.join("mft_slack");
         let _ = fs::create_dir_all(&mft_dir);
@@ -241,12 +313,22 @@ pub fn wipe_free_space(
             }
         }
         let _ = fs::remove_dir_all(&mft_dir);
+
+        if cancel_flag.load(Ordering::Relaxed) {
+            if let Ok(mut p) = progress.lock() {
+                p.running = false;
+                p.finished = true;
+                p.status_message =
+                    "Bonifica annullata dall'utente. Spazio temporaneo rilasciato.".to_string();
+            }
+            return Ok(0);
+        }
     }
 
     // Phase 2: Low-level unallocated cluster wiping with 4 MB aligned buffer and FILE_FLAG_WRITE_THROUGH
     const CHUNK_SIZE: usize = 4 * 1024 * 1024; // 4 MB buffer
     let mut buffer = vec![0u8; CHUNK_SIZE];
-    let wipe_file_path = container_dir.join("wipe_stream_00.dat");
+    let wipe_file_path = container_dir.join("_rustcleaner_wipe_stream.tmp");
 
     let mut file = OpenOptions::new()
         .create(true)
@@ -254,18 +336,19 @@ pub fn wipe_free_space(
         .truncate(true)
         .custom_flags(FILE_FLAG_WRITE_THROUGH)
         .open(&wipe_file_path)
-        .map_err(|e| format!("Impossibile aprire il flusso di bonifica '{}': {e}", wipe_file_path.display()))?;
+        .map_err(|e| {
+            format!(
+                "Impossibile aprire il flusso di bonifica '{}': {e}",
+                wipe_file_path.display()
+            )
+        })?;
 
     let start_time = Instant::now();
     let mut total_written_all_passes = 0u64;
 
     for pass_idx in 0..total_passes {
         if cancel_flag.load(Ordering::Relaxed) {
-            let mut p = progress.lock().unwrap();
-            p.running = false;
-            p.finished = true;
-            p.status_message = "Bonifica annullata dall'utente. Spazio temporaneo rilasciato.".to_string();
-            return Ok(total_written_all_passes);
+            break;
         }
 
         file.seek(SeekFrom::Start(0))
@@ -284,7 +367,7 @@ pub fn wipe_free_space(
                 (algorithm, pass_idx),
                 (WipeAlgorithm::DodThreePass, 2)
                     | (WipeAlgorithm::NsaSevenPass, 2 | 6)
-            ) && (written_this_pass / (CHUNK_SIZE as u64)) % 8 == 0
+            ) && (written_this_pass / (CHUNK_SIZE as u64)).is_multiple_of(8)
             {
                 rand::thread_rng().fill_bytes(&mut buffer);
             }
@@ -322,11 +405,25 @@ pub fn wipe_free_space(
             }
         }
 
+        if cancel_flag.load(Ordering::Relaxed) {
+            break;
+        }
+
         let _ = file.sync_all();
     }
 
     drop(file);
     let _ = fs::remove_file(&wipe_file_path);
+
+    if cancel_flag.load(Ordering::Relaxed) {
+        if let Ok(mut p) = progress.lock() {
+            p.running = false;
+            p.finished = true;
+            p.status_message =
+                "Bonifica annullata dall'utente. Spazio temporaneo rilasciato.".to_string();
+        }
+        return Ok(total_written_all_passes);
+    }
 
     if let Ok(mut p) = progress.lock() {
         p.running = false;
@@ -339,4 +436,65 @@ pub fn wipe_free_space(
     }
 
     Ok(total_written_all_passes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_wipe_drive_root_rejects_devices() {
+        assert!(validate_wipe_drive_root(r"\\.\PhysicalDrive0").is_err());
+        assert!(validate_wipe_drive_root(r"\\.\C:").is_err());
+        assert!(validate_wipe_drive_root(r"\\?\Volume{12345}").is_err());
+        assert!(validate_wipe_drive_root(r"C:\Windows\System32").is_err());
+        assert!(validate_wipe_drive_root("").is_err());
+    }
+
+    #[test]
+    fn test_validate_wipe_drive_root_valid_drives() {
+        let drives = list_drives();
+        if let Some(first) = drives.first() {
+            let res = validate_wipe_drive_root(&first.root_path);
+            assert!(res.is_ok(), "valid drive root should succeed");
+            assert_eq!(res.unwrap(), PathBuf::from(&first.root_path));
+        }
+    }
+
+    #[test]
+    fn test_fill_buffer_for_pass() {
+        let mut buf = vec![0xCC; 1024];
+        fill_buffer_for_pass(&mut buf, WipeAlgorithm::SimpleOnePassZero, 0);
+        assert!(buf.iter().all(|&b| b == 0x00));
+
+        fill_buffer_for_pass(&mut buf, WipeAlgorithm::DodThreePass, 0);
+        assert!(buf.iter().all(|&b| b == 0x00));
+        fill_buffer_for_pass(&mut buf, WipeAlgorithm::DodThreePass, 1);
+        assert!(buf.iter().all(|&b| b == 0xFF));
+    }
+
+    #[test]
+    fn test_wipe_free_space_cancellation_unlinks_temp() {
+        let drives = list_drives();
+        let Some(first) = drives.first() else { return };
+        let progress = Arc::new(Mutex::new(WipeProgress::default()));
+        let cancel = Arc::new(AtomicBool::new(true)); // Pre-cancelled
+
+        let res = wipe_free_space(
+            &first.root_path,
+            WipeAlgorithm::SimpleOnePassZero,
+            false,
+            Some(1),
+            progress.clone(),
+            cancel,
+        );
+
+        assert!(res.is_ok());
+        let created_container = progress.lock().ok().and_then(|p| p.container_dir.clone());
+        assert!(created_container.is_some(), "Container dir must be recorded in progress");
+        assert!(
+            !created_container.unwrap().exists(),
+            "temp wipe container must be cleanly unlinked upon cancellation"
+        );
+    }
 }

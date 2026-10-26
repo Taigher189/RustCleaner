@@ -1,4 +1,5 @@
 //! 2. Driver Updater (Official Windows Update Agent `WUApiLib` COM API + PnP Signed Driver Inspector)
+//!
 //! Queries Microsoft's official Windows Update infrastructure (`Microsoft.Update.Session` with
 //! `IsInstalled=0 and Type='Driver'`) to avoid unsafe third-party driver databases, and inspects
 //! installed WHQL-signed PnP hardware drivers.

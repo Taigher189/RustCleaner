@@ -189,9 +189,187 @@ fn matches_pattern(file_name: &str, pattern: &str) -> bool {
     name == pat
 }
 
+/// Returns `true` if `path` or any parent of `path` falls inside protected system or user directories:
+/// `System32`, `SysWOW64`, `WinSxS`, `Boot`, `bootmgr`, `Program Files\Windows NT`,
+/// user personal folders (`Documents`, `Desktop`, `Pictures`, `Music`, `Videos`),
+/// code repositories, or root volume devices.
+pub fn is_protected_system_path(path: &Path) -> bool {
+    let raw_str = path.to_string_lossy();
+    let trimmed = raw_str.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+
+    // Strip \\?\ verbatim prefix if present
+    let clean_str = if let Some(stripped) = trimmed.strip_prefix(r"\\?\") {
+        stripped
+    } else {
+        trimmed
+    };
+
+    let norm = clean_str.replace('/', "\\").to_lowercase();
+
+    // 1. Device and physical drive paths
+    if norm.starts_with(r"\\.\")
+        || norm.starts_with(r"\??\")
+        || norm.contains("physicaldrive")
+        || norm.contains("volume{")
+    {
+        return true;
+    }
+
+    // 2. Drive root protection (e.g. "C:\", "C:", "\")
+    if norm == "\\"
+        || (norm.len() == 2 && norm.ends_with(':'))
+        || (norm.len() == 3 && norm.ends_with(r":\"))
+    {
+        return true;
+    }
+
+    // 3. bootmgr file
+    if norm == "bootmgr" || norm.ends_with(r"\bootmgr") {
+        return true;
+    }
+    if let Some(file_name) = path.file_name().and_then(|f| f.to_str()) {
+        if file_name.eq_ignore_ascii_case("bootmgr") {
+            return true;
+        }
+    }
+
+    // 4. Windows System Directories
+    let windir = env::var("WINDIR")
+        .or_else(|_| env::var("SystemRoot"))
+        .unwrap_or_else(|_| r"C:\Windows".to_string())
+        .replace('/', "\\")
+        .to_lowercase();
+
+    let protected_system_dirs = [
+        format!(r"{windir}\system32"),
+        format!(r"{windir}\syswow64"),
+        format!(r"{windir}\winsxs"),
+        format!(r"{windir}\boot"),
+        r"c:\windows\system32".to_string(),
+        r"c:\windows\syswow64".to_string(),
+        r"c:\windows\winsxs".to_string(),
+        r"c:\windows\boot".to_string(),
+    ];
+
+    for sys_dir in &protected_system_dirs {
+        if norm == *sys_dir || norm.starts_with(&format!(r"{sys_dir}\")) {
+            return true;
+        }
+    }
+
+    // 5. Program Files \ Windows NT
+    let pf = env::var("ProgramFiles")
+        .unwrap_or_else(|_| r"C:\Program Files".to_string())
+        .replace('/', "\\")
+        .to_lowercase();
+    let pf86 = env::var("ProgramFiles(x86)")
+        .unwrap_or_else(|_| r"C:\Program Files (x86)".to_string())
+        .replace('/', "\\")
+        .to_lowercase();
+
+    let protected_pf_dirs = [
+        format!(r"{pf}\windows nt"),
+        format!(r"{pf86}\windows nt"),
+        r"c:\program files\windows nt".to_string(),
+        r"c:\program files (x86)\windows nt".to_string(),
+    ];
+
+    for dir in &protected_pf_dirs {
+        if norm == *dir || norm.starts_with(&format!(r"{dir}\")) {
+            return true;
+        }
+    }
+
+    // 6. User Personal Directories: Documents, Desktop, Pictures, Music, Videos
+    let personal_folders = [
+        "documents",
+        "desktop",
+        "pictures",
+        "music",
+        "videos",
+        "my documents",
+        "my pictures",
+        "my music",
+        "my videos",
+    ];
+
+    // Check against USERPROFILE if set
+    if let Ok(userprofile) = env::var("USERPROFILE") {
+        let up = userprofile.replace('/', "\\").to_lowercase();
+        for folder in &personal_folders {
+            let target = format!(r"{up}\{folder}");
+            if norm == target || norm.starts_with(&format!(r"{target}\")) {
+                return true;
+            }
+            // Also OneDrive user folders (e.g. %USERPROFILE%\OneDrive\Documents)
+            let onedrive_target = format!(r"{up}\onedrive\{folder}");
+            if norm == onedrive_target || norm.starts_with(&format!(r"{onedrive_target}\")) {
+                return true;
+            }
+        }
+    }
+
+    // Generic pattern check: \users\<username>\<personal_folder> (and with \onedrive\)
+    if let Some(pos) = norm.find(r"\users\") {
+        let after_users = &norm[pos + 7..];
+        let segments: Vec<&str> = after_users.split('\\').collect();
+        if segments.len() >= 2 {
+            let sub = segments[1];
+            if personal_folders.contains(&sub) {
+                return true;
+            }
+            if sub == "onedrive" && segments.len() >= 3 && personal_folders.contains(&segments[2]) {
+                return true;
+            }
+        }
+    }
+
+    // 7. Code Repositories
+    for comp in path.components() {
+        if let Some(comp_str) = comp.as_os_str().to_str() {
+            let c_lower = comp_str.to_lowercase();
+            if c_lower == ".git" || c_lower == ".hg" || c_lower == ".svn" {
+                return true;
+            }
+        }
+    }
+
+    if norm.contains(r"\.git\") || norm.ends_with(r"\.git") {
+        return true;
+    }
+
+    // Check if path or any ancestor contains .git or Cargo.toml
+    let check_path = if path.is_file() {
+        path.parent()
+    } else {
+        Some(path)
+    };
+    if let Some(mut curr) = check_path {
+        for _ in 0..16 {
+            if curr.join(".git").exists() || curr.join("Cargo.toml").exists() {
+                return true;
+            }
+            match curr.parent() {
+                Some(p) => curr = p,
+                None => break,
+            }
+        }
+    }
+
+    false
+}
+
 /// Tests if a file is currently locked/in-use by another process or protected by OS permissions.
+/// Never mutates file permissions on disk (strictly read-only analysis).
 /// Never panics: returns `(is_locked, reason)`.
 fn probe_file_lock(path: &Path) -> (bool, Option<String>) {
+    if is_protected_system_path(path) {
+        return (true, Some("Percorso protetto dal sistema".to_string()));
+    }
+
     // desktop.ini and PFRO.log are excluded by CCleaner (`0x1a090c0`, `winsys.ini:434`)
     if let Some(fname) = path.file_name().and_then(|n| n.to_str()) {
         let lower = fname.to_lowercase();
@@ -200,25 +378,35 @@ fn probe_file_lock(path: &Path) -> (bool, Option<String>) {
         }
     }
 
-    // If the file is marked read-only, clear the attribute so we can accurately probe for file locks
-    if let Ok(meta) = path.metadata() {
-        let mut perms = meta.permissions();
-        if perms.readonly() {
-            perms.set_readonly(false);
-            let _ = fs::set_permissions(path, perms);
-        }
-    }
+    let is_readonly = path.metadata().map(|m| m.permissions().readonly()).unwrap_or(false);
 
-    match OpenOptions::new().write(true).open(path) {
-        Ok(_) => (false, None),
-        Err(e) => {
-            let code = e.raw_os_error().unwrap_or(0);
-            let msg = match code {
-                32 | 33 => format!("File in uso da un altro processo (OS error {code})"),
-                5 => "Accesso negato (richiede privilegi UAC o file protetto)".to_string(),
-                _ => format!("Impossibile accedere: {e}"),
-            };
-            (true, Some(msg))
+    if is_readonly {
+        // Do NOT mutate permissions during read-only analysis.
+        // Test lock status via read open.
+        match OpenOptions::new().read(true).open(path) {
+            Ok(_) => (false, None),
+            Err(e) => {
+                let code = e.raw_os_error().unwrap_or(0);
+                let msg = match code {
+                    32 | 33 => format!("File in uso da un altro processo (OS error {code})"),
+                    5 => "Accesso negato (richiede privilegi UAC o file protetto)".to_string(),
+                    _ => format!("Impossibile accedere: {e}"),
+                };
+                (true, Some(msg))
+            }
+        }
+    } else {
+        match OpenOptions::new().write(true).open(path) {
+            Ok(_) => (false, None),
+            Err(e) => {
+                let code = e.raw_os_error().unwrap_or(0);
+                let msg = match code {
+                    32 | 33 => format!("File in uso da un altro processo (OS error {code})"),
+                    5 => "Accesso negato (richiede privilegi UAC o file protetto)".to_string(),
+                    _ => format!("Impossibile accedere: {e}"),
+                };
+                (true, Some(msg))
+            }
         }
     }
 }
@@ -298,7 +486,7 @@ pub fn default_clean_rules() -> Vec<CleanRule> {
             special_recycle_bin: false,
             targets: vec![
                 FileTarget {
-                    base_dir: r"%SystemDirectory%\wbem\Logs".to_string(),
+                    base_dir: r"%WINDIR%\Logs".to_string(),
                     patterns: vec!["*.log".to_string(), "*.lo_".to_string()],
                     recursive: false,
                 },
@@ -614,7 +802,7 @@ pub fn scan_rule(rule: &CleanRule) -> RuleScanResult {
 
     for target in &rule.targets {
         let base = expand_env_vars(&target.base_dir);
-        if !base.exists() {
+        if is_protected_system_path(&base) || !base.exists() {
             continue;
         }
 
@@ -627,7 +815,7 @@ pub fn scan_rule(rule: &CleanRule) -> RuleScanResult {
 
         for entry in walker {
             let path = entry.path();
-            if !path.is_file() {
+            if !path.is_file() || is_protected_system_path(path) {
                 continue;
             }
             let Some(fname) = path.file_name().and_then(|n| n.to_str()) else {
@@ -692,7 +880,7 @@ pub fn analyze_all(rules: &[CleanRule]) -> CleanSummary {
 
 /// Executes the cleaning operation on all enabled rules.
 /// Uses `SHEmptyRecycleBinW` when the Recycle Bin rule is enabled, and deletes unlocked files in parallel.
-/// Locked or in-use files are safely skipped without panicking.
+/// Locked, in-use, or protected files are safely skipped without panicking.
 pub fn execute_clean(rules: &[CleanRule]) -> CleanSummary {
     let mut summary = analyze_all(rules);
     let mut deleted_files = 0usize;
@@ -729,7 +917,7 @@ pub fn execute_clean(rules: &[CleanRule]) -> CleanSummary {
 
     for res in &summary.results {
         for item in &res.files {
-            if item.locked_or_denied {
+            if item.locked_or_denied || is_protected_system_path(&item.path) {
                 skipped_locked += 1;
                 continue;
             }
@@ -737,6 +925,7 @@ pub fn execute_clean(rules: &[CleanRule]) -> CleanSummary {
             if let Ok(meta) = item.path.metadata() {
                 let mut perms = meta.permissions();
                 if perms.readonly() {
+                    #[allow(clippy::permissions_set_readonly_false)]
                     perms.set_readonly(false);
                     let _ = fs::set_permissions(&item.path, perms);
                 }
@@ -764,7 +953,9 @@ pub fn execute_clean(rules: &[CleanRule]) -> CleanSummary {
         for target in &rule.targets {
             if target.recursive {
                 let base = expand_env_vars(&target.base_dir);
-                prune_empty_subdirs(&base);
+                if !is_protected_system_path(&base) {
+                    prune_empty_subdirs(&base);
+                }
             }
         }
     }
@@ -778,8 +969,9 @@ pub fn execute_clean(rules: &[CleanRule]) -> CleanSummary {
 
 /// Safely prunes empty subdirectories inside `base_dir` bottom-up.
 /// Only removes child subdirectories that are completely empty. Never removes `base_dir` itself.
+/// Explicitly rejects and never touches protected system paths.
 pub fn prune_empty_subdirs(base_dir: &Path) {
-    if !base_dir.is_dir() {
+    if is_protected_system_path(base_dir) || !base_dir.is_dir() {
         return;
     }
     let mut dirs: Vec<PathBuf> = WalkDir::new(base_dir)
@@ -789,14 +981,17 @@ pub fn prune_empty_subdirs(base_dir: &Path) {
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_dir())
         .map(|e| e.path().to_path_buf())
+        .filter(|p| !is_protected_system_path(p))
         .collect();
 
     // Sort descending by component depth so deepest subdirectories are deleted first
-    dirs.sort_by(|a, b| b.components().count().cmp(&a.components().count()));
+    dirs.sort_by_key(|a| std::cmp::Reverse(a.components().count()));
 
     for dir in dirs {
-        // fs::remove_dir succeeds strictly on empty directories; fails safely if files remain
-        let _ = fs::remove_dir(dir);
+        if !is_protected_system_path(&dir) {
+            // fs::remove_dir succeeds strictly on empty directories; fails safely if files remain
+            let _ = fs::remove_dir(dir);
+        }
     }
 }
 
@@ -866,6 +1061,70 @@ mod tests {
         assert!(keep_file.exists(), "file in non-empty subdir should remain");
 
         let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn test_is_protected_system_path_system_directories() {
+        assert!(is_protected_system_path(Path::new(r"C:\Windows\System32")));
+        assert!(is_protected_system_path(Path::new(r"C:\Windows\System32\cmd.exe")));
+        assert!(is_protected_system_path(Path::new(r"C:\Windows\SysWOW64\kernel32.dll")));
+        assert!(is_protected_system_path(Path::new(r"C:\Windows\WinSxS\manifest.xml")));
+        assert!(is_protected_system_path(Path::new(r"C:\Windows\Boot\DVD\boot.sdi")));
+        assert!(is_protected_system_path(Path::new(r"C:\Program Files\Windows NT\Accessories")));
+        assert!(is_protected_system_path(Path::new(r"\\.\PhysicalDrive0")));
+        assert!(is_protected_system_path(Path::new(r"C:\")));
+    }
+
+    #[test]
+    fn test_is_protected_system_path_personal_directories() {
+        assert!(is_protected_system_path(Path::new(r"C:\Users\Alice\Documents\report.docx")));
+        assert!(is_protected_system_path(Path::new(r"C:\Users\Alice\Desktop\shortcut.lnk")));
+        assert!(is_protected_system_path(Path::new(r"C:\Users\Alice\Pictures\photo.jpg")));
+        assert!(is_protected_system_path(Path::new(r"C:\Users\Alice\Music\song.mp3")));
+        assert!(is_protected_system_path(Path::new(r"C:\Users\Alice\Videos\movie.mp4")));
+        assert!(is_protected_system_path(Path::new(r"C:\Users\Alice\OneDrive\Documents\sheet.xlsx")));
+    }
+
+    #[test]
+    fn test_is_protected_system_path_repos_and_boot() {
+        assert!(is_protected_system_path(Path::new(r"C:\bootmgr")));
+        assert!(is_protected_system_path(Path::new(r"C:\Windows\bootmgr")));
+        assert!(is_protected_system_path(Path::new(r"D:\MyProject\.git\config")));
+        // Current repo itself
+        assert!(is_protected_system_path(Path::new(r"d:\Repo\RustCleaner\src\main.rs")));
+    }
+
+    #[test]
+    fn test_is_protected_system_path_allows_temp() {
+        assert!(!is_protected_system_path(Path::new(r"C:\Windows\Temp\test.tmp")));
+        assert!(!is_protected_system_path(Path::new(r"C:\Windows\Logs\cbs.log")));
+        assert!(!is_protected_system_path(Path::new(r"C:\Users\Alice\AppData\Local\Temp\cache.tmp")));
+    }
+
+    #[test]
+    fn test_probe_file_lock_read_only_preserves_attributes() {
+        let test_file = std::env::temp_dir().join("rustcleaner_test_probe_readonly.tmp");
+        let _ = fs::write(&test_file, "readonly content");
+        if let Ok(meta) = test_file.metadata() {
+            let mut perms = meta.permissions();
+            perms.set_readonly(true);
+            let _ = fs::set_permissions(&test_file, perms);
+        }
+
+        let (locked, reason) = probe_file_lock(&test_file);
+        assert!(!locked, "unlocked readonly file should probe as not locked");
+        assert!(reason.is_none());
+
+        // Verify the file's readonly attribute was NOT cleared during probe
+        let meta_after = test_file.metadata().expect("file should exist");
+        assert!(meta_after.permissions().readonly(), "probe_file_lock must preserve readonly attribute");
+
+        // Clean up
+        let mut perms = meta_after.permissions();
+        #[allow(clippy::permissions_set_readonly_false)]
+        perms.set_readonly(false);
+        let _ = fs::set_permissions(&test_file, perms);
+        let _ = fs::remove_file(&test_file);
     }
 }
 

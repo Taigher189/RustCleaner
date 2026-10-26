@@ -15,7 +15,7 @@
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use winreg::enums::*;
 use winreg::{RegKey, RegValue};
@@ -248,38 +248,103 @@ pub fn set_startup_enabled(entry: &StartupEntry, enable: bool) -> Result<(), Str
 }
 
 /// Deletes a Startup item permanently from the Registry or Startup folder.
-pub fn delete_startup_entry(entry: &StartupEntry) -> Result<(), String> {
+/// Mandates `.reg` backup creation before any registry modification or deletion.
+pub fn delete_startup_entry(
+    entry: &StartupEntry,
+    backup_dir: Option<&Path>,
+) -> Result<PathBuf, String> {
+    let default_backup = std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join("registry_backups");
+    let target_dir = backup_dir.unwrap_or(&default_backup);
+
     match entry.source {
-        StartupSource::HkcuRun => {
-            let key = RegKey::predef(HKEY_CURRENT_USER)
-                .open_subkey_with_flags(r"Software\Microsoft\Windows\CurrentVersion\Run", KEY_SET_VALUE)
-                .map_err(|e| e.to_string())?;
-            key.delete_value(&entry.name).map_err(|e| e.to_string())
-        }
-        StartupSource::HkcuRunOnce => {
-            let key = RegKey::predef(HKEY_CURRENT_USER)
-                .open_subkey_with_flags(r"Software\Microsoft\Windows\CurrentVersion\RunOnce", KEY_SET_VALUE)
-                .map_err(|e| e.to_string())?;
-            key.delete_value(&entry.name).map_err(|e| e.to_string())
-        }
-        StartupSource::HklmRun => {
-            let key = RegKey::predef(HKEY_LOCAL_MACHINE)
-                .open_subkey_with_flags(r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", KEY_SET_VALUE)
-                .map_err(|e| format!("Accesso negato a HKLM:Run (avvia come Amministratore): {e}"))?;
-            key.delete_value(&entry.name).map_err(|e| e.to_string())
-        }
-        StartupSource::HklmWow64Run => {
-            let key = RegKey::predef(HKEY_LOCAL_MACHINE)
-                .open_subkey_with_flags(
+        StartupSource::HkcuRun
+        | StartupSource::HkcuRunOnce
+        | StartupSource::HklmRun
+        | StartupSource::HklmWow64Run => {
+            let (hive, subkey_path, key_flags) = match entry.source {
+                StartupSource::HkcuRun => (
+                    crate::registry::HiveRoot::Hkcu,
+                    r"Software\Microsoft\Windows\CurrentVersion\Run",
+                    KEY_READ | KEY_SET_VALUE,
+                ),
+                StartupSource::HkcuRunOnce => (
+                    crate::registry::HiveRoot::Hkcu,
+                    r"Software\Microsoft\Windows\CurrentVersion\RunOnce",
+                    KEY_READ | KEY_SET_VALUE,
+                ),
+                StartupSource::HklmRun => (
+                    crate::registry::HiveRoot::Hklm,
+                    r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
+                    KEY_READ | KEY_SET_VALUE,
+                ),
+                StartupSource::HklmWow64Run => (
+                    crate::registry::HiveRoot::Hklm,
                     r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run",
-                    KEY_SET_VALUE,
+                    KEY_READ | KEY_SET_VALUE,
+                ),
+                _ => unreachable!(),
+            };
+
+            let predef = match hive {
+                crate::registry::HiveRoot::Hkcu => RegKey::predef(HKEY_CURRENT_USER),
+                crate::registry::HiveRoot::Hklm => RegKey::predef(HKEY_LOCAL_MACHINE),
+            };
+
+            let key = predef
+                .open_subkey_with_flags(subkey_path, key_flags)
+                .map_err(|e| {
+                    format!("Impossibile accedere alla chiave di registro '{subkey_path}': {e}")
+                })?;
+
+            // Retrieve original data for backup fidelity
+            let orig_data = key
+                .get_value::<String, _>(&entry.name)
+                .unwrap_or_else(|_| entry.command.clone());
+
+            let issue = crate::registry::RegistryIssue {
+                selected: true,
+                category: crate::registry::RegistryCategory::RunStartupOrphans,
+                problem_description: format!("Eliminazione voce di avvio: {}", entry.name),
+                data_reference: orig_data.clone(),
+                hive,
+                key_path: subkey_path.to_string(),
+                action: crate::registry::RegTargetAction::DeleteValue {
+                    value_name: entry.name.clone(),
+                    original_data: orig_data,
+                    is_dword: false,
+                },
+            };
+
+            // Mandatory Step 1: Export valid .reg backup FIRST!
+            let backup_file = crate::registry::export_reg_backup(&[issue], target_dir)?;
+
+            // Mandatory Step 2: Delete value only after backup succeeds
+            key.delete_value(&entry.name).map_err(|e| {
+                format!(
+                    "Backup creato con successo in '{}', ma eliminazione fallita: {e}",
+                    backup_file.display()
                 )
-                .map_err(|e| format!("Accesso negato a HKLM:WOW6432Node:Run: {e}"))?;
-            key.delete_value(&entry.name).map_err(|e| e.to_string())
+            })?;
+
+            Ok(backup_file)
         }
         StartupSource::StartupFolderUser | StartupSource::StartupFolderCommon => {
             if let Some(p) = &entry.file_path_if_folder {
-                fs::remove_file(p).map_err(|e| format!("Impossibile rimuovere '{}': {e}", p.display()))
+                if !p.exists() {
+                    return Err(format!("File di avvio non trovato: '{}'", p.display()));
+                }
+                fs::create_dir_all(target_dir)
+                    .map_err(|e| format!("Impossibile creare cartella di backup: {e}"))?;
+                let fname = p.file_name().unwrap_or_default().to_string_lossy();
+                let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+                let backup_file = target_dir.join(format!("{fname}_{timestamp}.bak"));
+                fs::copy(p, &backup_file)
+                    .map_err(|e| format!("Impossibile creare backup del file di avvio: {e}"))?;
+                fs::remove_file(p)
+                    .map_err(|e| format!("Impossibile rimuovere '{}': {e}", p.display()))?;
+                Ok(backup_file)
             } else {
                 Err("Percorso file di avvio mancante.".to_string())
             }
@@ -380,7 +445,7 @@ pub fn list_installed_apps() -> Vec<InstalledApp> {
         }
     }
 
-    apps.sort_by(|a, b| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()));
+    apps.sort_by_key(|a| a.display_name.to_lowercase());
     apps.dedup_by(|a, b| {
         a.display_name.eq_ignore_ascii_case(&b.display_name)
             && a.display_version == b.display_version
@@ -572,5 +637,29 @@ mod tests {
         assert!(StartupSource::StartupFolderCommon.requires_admin());
         assert!(!StartupSource::HkcuRun.requires_admin());
         assert!(!StartupSource::StartupFolderUser.requires_admin());
+    }
+
+    #[test]
+    fn test_delete_startup_entry_folder_creates_backup() {
+        let temp_dir = std::env::temp_dir().join("rustcleaner_test_startup_folder");
+        let _ = fs::create_dir_all(&temp_dir);
+        let shortcut_file = temp_dir.join("test_app.lnk");
+        let _ = fs::write(&shortcut_file, "mock shortcut content");
+
+        let backup_dir = temp_dir.join("backups");
+        let entry = StartupEntry {
+            name: "TestApp".to_string(),
+            command: shortcut_file.to_string_lossy().to_string(),
+            source: StartupSource::StartupFolderUser,
+            enabled: true,
+            file_path_if_folder: Some(shortcut_file.clone()),
+        };
+
+        let backup_file =
+            delete_startup_entry(&entry, Some(&backup_dir)).expect("should delete and backup");
+        assert!(backup_file.exists(), "backup file should exist");
+        assert!(!shortcut_file.exists(), "original shortcut should be deleted");
+
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 }

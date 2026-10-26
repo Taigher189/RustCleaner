@@ -500,6 +500,25 @@ pub struct Strings {
     pub mon_live_feed_hdr: &'static str,
     pub mon_empty_title: &'static str,
     pub mon_empty_desc: &'static str,
+
+    // Missing Status & Unit Tokens
+    pub banner_skipped_suffix: &'static str,
+    pub banner_locked_suffix: &'static str,
+    pub kpi_files_unit: &'static str,
+    pub banner_fixed_suffix: &'static str,
+    pub banner_startup_deleted: &'static str,
+    pub lbl_backup: &'static str,
+    pub kpi_winget_subtitle: &'static str,
+    pub kpi_prop_servers_val: &'static str,
+    pub lbl_package_source: &'static str,
+    pub banner_monitor_active: &'static str,
+    pub banner_monitor_stopped: &'static str,
+
+    // Async Threading Feedback Messages
+    pub reg_scanning_msg: &'static str,
+    pub reg_fixing_msg: &'static str,
+    pub drv_installing_msg: &'static str,
+    pub auto_running_silent_msg: &'static str,
 }
 
 pub static STRINGS_IT: Strings = Strings {
@@ -677,6 +696,21 @@ pub static STRINGS_IT: Strings = Strings {
     mon_live_feed_hdr: "Feed Eventi Kernel in Tempo Reale (ReadDirectoryChangesW):",
     mon_empty_title: "In Attesa di Eventi I/O dal Kernel",
     mon_empty_desc: "Avvia il monitor per osservare in diretta le modifiche a %TEMP% e alle sessioni dei browser.",
+    banner_skipped_suffix: "ignorati",
+    banner_locked_suffix: "bloccati",
+    kpi_files_unit: "file",
+    banner_fixed_suffix: "riparati",
+    banner_startup_deleted: "eliminato",
+    lbl_backup: "backup",
+    kpi_winget_subtitle: "Gestore pacchetti Windows",
+    kpi_prop_servers_val: "0 (100% Libero)",
+    lbl_package_source: "Sorgente",
+    banner_monitor_active: "ReadDirectoryChangesW attivo (0% CPU polling).",
+    banner_monitor_stopped: "ReadDirectoryChangesW arrestato.",
+    reg_scanning_msg: "Scansione del Registro di sistema in corso...",
+    reg_fixing_msg: "Riparazione e backup del Registro in corso...",
+    drv_installing_msg: "Installazione driver Windows Update in corso...",
+    auto_running_silent_msg: "Esecuzione test --silent-clean in corso...",
 };
 
 pub static STRINGS_EN: Strings = Strings {
@@ -854,6 +888,21 @@ pub static STRINGS_EN: Strings = Strings {
     mon_live_feed_hdr: "Real-Time Kernel I/O Event Feed (ReadDirectoryChangesW):",
     mon_empty_title: "Waiting for Kernel I/O Events",
     mon_empty_desc: "Start the monitor to watch live changes to %TEMP% and browser lock/session files.",
+    banner_skipped_suffix: "skipped",
+    banner_locked_suffix: "locked",
+    kpi_files_unit: "files",
+    banner_fixed_suffix: "fixed",
+    banner_startup_deleted: "deleted",
+    lbl_backup: "backup",
+    kpi_winget_subtitle: "Windows Package Manager",
+    kpi_prop_servers_val: "0 (100% Free)",
+    lbl_package_source: "Source",
+    banner_monitor_active: "ReadDirectoryChangesW active (0% CPU polling).",
+    banner_monitor_stopped: "ReadDirectoryChangesW stopped.",
+    reg_scanning_msg: "Scanning Windows Registry in background...",
+    reg_fixing_msg: "Backing up and repairing Registry entries...",
+    drv_installing_msg: "Installing Windows Update drivers...",
+    auto_running_silent_msg: "Running --silent-clean maintenance test...",
 };
 
 pub static STRINGS_FR: Strings = Strings {
@@ -1031,6 +1080,21 @@ pub static STRINGS_FR: Strings = Strings {
     mon_live_feed_hdr: "Flux d'Événements E/S du Noyau en Temps Réel :",
     mon_empty_title: "En Attente d'Événements E/S du Noyau",
     mon_empty_desc: "Démarrez le moniteur pour observer en direct les modifications de %TEMP% et des navigateurs.",
+    banner_skipped_suffix: "ignorés",
+    banner_locked_suffix: "verrouillés",
+    kpi_files_unit: "fichiers",
+    banner_fixed_suffix: "réparés",
+    banner_startup_deleted: "supprimé",
+    lbl_backup: "sauvegarde",
+    kpi_winget_subtitle: "Gestionnaire de paquets Windows",
+    kpi_prop_servers_val: "0 (100% Gratuit)",
+    lbl_package_source: "Source",
+    banner_monitor_active: "ReadDirectoryChangesW actif (0% de CPU en attente).",
+    banner_monitor_stopped: "ReadDirectoryChangesW arrêté.",
+    reg_scanning_msg: "Analyse du Registre Windows en cours...",
+    reg_fixing_msg: "Sauvegarde et réparation du Registre...",
+    drv_installing_msg: "Installation des pilotes Windows Update...",
+    auto_running_silent_msg: "Exécution du test --silent-clean en cours...",
 };
 
 pub static STRINGS_ES: Strings = Strings {
@@ -1208,6 +1272,21 @@ pub static STRINGS_ES: Strings = Strings {
     mon_live_feed_hdr: "Eventos E/S del Kernel en Tiempo Real (ReadDirectoryChangesW):",
     mon_empty_title: "Esperando Eventos E/S del Kernel",
     mon_empty_desc: "Inicia el monitor para observar en vivo los cambios en %TEMP% y sesiones de navegadores.",
+    banner_skipped_suffix: "omitidos",
+    banner_locked_suffix: "bloqueados",
+    kpi_files_unit: "archivos",
+    banner_fixed_suffix: "corregidos",
+    banner_startup_deleted: "eliminado",
+    lbl_backup: "copia de seguridad",
+    kpi_winget_subtitle: "Administrador de paquetes de Windows",
+    kpi_prop_servers_val: "0 (100% Libre)",
+    lbl_package_source: "Origen",
+    banner_monitor_active: "ReadDirectoryChangesW activo (0% sondeo CPU).",
+    banner_monitor_stopped: "ReadDirectoryChangesW detenido.",
+    reg_scanning_msg: "Escaneando el Registro de Windows...",
+    reg_fixing_msg: "Copia de seguridad y reparación del Registro...",
+    drv_installing_msg: "Instalando controladores de Windows Update...",
+    auto_running_silent_msg: "Ejecutando prueba de --silent-clean...",
 };
 
 pub static STRINGS_DE: Strings = Strings {
@@ -1385,6 +1464,21 @@ pub static STRINGS_DE: Strings = Strings {
     mon_live_feed_hdr: "Echtzeit-Kernel-I/O-Ereignisse (ReadDirectoryChangesW):",
     mon_empty_title: "Warte auf Kernel-I/O-Ereignisse",
     mon_empty_desc: "Starten Sie den Monitor, um Änderungen in %TEMP% und Browsersitzungen live zu sehen.",
+    banner_skipped_suffix: "übersprungen",
+    banner_locked_suffix: "gesperrt",
+    kpi_files_unit: "Dateien",
+    banner_fixed_suffix: "behoben",
+    banner_startup_deleted: "gelöscht",
+    lbl_backup: "Sicherung",
+    kpi_winget_subtitle: "Windows-Paket-Manager",
+    kpi_prop_servers_val: "0 (100% Kostenlos)",
+    lbl_package_source: "Quelle",
+    banner_monitor_active: "ReadDirectoryChangesW aktiv (0% CPU-Polling).",
+    banner_monitor_stopped: "ReadDirectoryChangesW angehalten.",
+    reg_scanning_msg: "Windows-Registrierung wird gescannt...",
+    reg_fixing_msg: "Registrierung wird gesichert und repariert...",
+    drv_installing_msg: "Windows Update-Treiber werden installiert...",
+    auto_running_silent_msg: "--silent-clean Wartungstest läuft...",
 };
 
 pub static STRINGS_ZH: Strings = Strings {
@@ -1562,6 +1656,21 @@ pub static STRINGS_ZH: Strings = Strings {
     mon_live_feed_hdr: "实时内核 I/O 事件流 (ReadDirectoryChangesW)：",
     mon_empty_title: "正在等待内核 I/O 事件",
     mon_empty_desc: "启动监控以实时观察 %TEMP% 与浏览器会话文件的更改。",
+    banner_skipped_suffix: "个已跳过",
+    banner_locked_suffix: "个已锁定",
+    kpi_files_unit: "个文件",
+    banner_fixed_suffix: "个已修复",
+    banner_startup_deleted: "已删除",
+    lbl_backup: "备份",
+    kpi_winget_subtitle: "Windows 程序包管理器",
+    kpi_prop_servers_val: "0 (100% 自由开源)",
+    lbl_package_source: "源",
+    banner_monitor_active: "ReadDirectoryChangesW 已启动 (0% CPU 轮询占用)。",
+    banner_monitor_stopped: "ReadDirectoryChangesW 已停止。",
+    reg_scanning_msg: "正在扫描 Windows 注册表...",
+    reg_fixing_msg: "正在备份并修复注册表项...",
+    drv_installing_msg: "正在安装 Windows Update 驱动程序...",
+    auto_running_silent_msg: "正在执行 --silent-clean 维护测试...",
 };
 
 pub static STRINGS_PT: Strings = Strings {
@@ -1739,61 +1848,22 @@ pub static STRINGS_PT: Strings = Strings {
     mon_live_feed_hdr: "Feed de Eventos I/O do Kernel em Tempo Real:",
     mon_empty_title: "Aguardando Eventos I/O do Kernel",
     mon_empty_desc: "Inicie o monitor para observar ao vivo alterações em %TEMP% e sessões de navegadores.",
+    banner_skipped_suffix: "ignorados",
+    banner_locked_suffix: "bloqueados",
+    kpi_files_unit: "arquivos",
+    banner_fixed_suffix: "corrigidos",
+    banner_startup_deleted: "excluído",
+    lbl_backup: "backup",
+    kpi_winget_subtitle: "Gerenciador de Pacotes do Windows",
+    kpi_prop_servers_val: "0 (100% Gratuito)",
+    lbl_package_source: "Origem",
+    banner_monitor_active: "ReadDirectoryChangesW ativo (0% polling de CPU).",
+    banner_monitor_stopped: "ReadDirectoryChangesW interrompido.",
+    reg_scanning_msg: "Verificando o Registro do Windows...",
+    reg_fixing_msg: "Fazendo backup e reparando o Registro...",
+    drv_installing_msg: "Instalando drivers do Windows Update...",
+    auto_running_silent_msg: "Executando teste do --silent-clean...",
 };
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::cleaner::default_clean_rules;
-
-    #[test]
-    fn test_all_seven_languages_have_non_empty_strings() {
-        assert_eq!(Language::all().len(), 7);
-        for &lang in Language::all() {
-            let s = lang.strings();
-            assert!(!s.cleaner_title.is_empty());
-            assert!(!s.reg_title.is_empty());
-            assert!(!s.soft_title.is_empty());
-            assert!(!s.drv_title.is_empty());
-            assert!(!s.auto_title.is_empty());
-            assert!(!s.btn_select_all.is_empty());
-            assert!(!s.btn_deselect_all.is_empty());
-            assert!(!s.lbl_search_filter.is_empty());
-            assert!(!s.badge_admin_required.is_empty());
-            assert!(!s.wiper_safety_note.is_empty());
-        }
-    }
-
-    #[test]
-    fn test_all_rules_localized_in_all_languages() {
-        let rules = default_clean_rules();
-        for &lang in Language::all() {
-            if lang == Language::Italian {
-                continue;
-            }
-            for rule in &rules {
-                let loc = lang.localize_rule(rule.id);
-                assert!(
-                    loc.is_some(),
-                    "Missing localization for rule ID {} in {:?}",
-                    rule.id,
-                    lang
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn test_all_reg_categories_localized_in_all_languages() {
-        for &lang in Language::all() {
-            for &cat in RegistryCategory::all() {
-                let (title, desc) = lang.localize_reg_category(cat);
-                assert!(!title.is_empty());
-                assert!(!desc.is_empty());
-            }
-        }
-    }
-}
 
 
 // ============================================================================
@@ -2199,3 +2269,256 @@ pub static DISK_STRINGS_PT: DiskAnalyzerStrings = DiskAnalyzerStrings {
     empty_no_large_title: "Nenhum Arquivo Grande Acima do Limite",
     empty_no_large_desc: "Reduza o limite em MB para listar mais arquivos.",
 };
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cleaner::default_clean_rules;
+
+macro_rules! assert_fields_non_empty {
+    ($s:expr, $lang:expr, $($field:ident),* $(,)?) => {
+        $(
+            assert!(
+                !$s.$field.trim().is_empty(),
+                "Field '{}' is empty in language {:?}",
+                stringify!($field),
+                $lang
+            );
+        )*
+    };
+}
+
+    #[test]
+    fn test_all_seven_languages_have_non_empty_strings() {
+        assert_eq!(Language::all().len(), 7);
+        for &lang in Language::all() {
+            let s = lang.strings();
+            assert_fields_non_empty!(
+                s,
+                lang,
+                // Header & Status
+                badge_zero_telemetry,
+                header_subtitle,
+                uac_admin_active,
+                uac_standard_mode,
+                btn_elevate_uac,
+                drive_free_label,
+                theme_dark_label,
+                theme_light_label,
+                status_ready,
+                status_running,
+                default_banner_admin,
+                default_banner_user,
+                btn_select_all,
+                btn_deselect_all,
+                lbl_search_filter,
+                badge_admin_required,
+                // Sidebar
+                sidebar_sec_maintenance,
+                sidebar_sec_premium,
+                nav_cleaner_title,
+                nav_cleaner_sub,
+                nav_registry_title,
+                nav_registry_sub,
+                nav_startup_title,
+                nav_startup_sub,
+                nav_uninstall_title,
+                nav_uninstall_sub,
+                nav_wiper_title,
+                nav_wiper_sub,
+                nav_soft_title,
+                nav_soft_sub,
+                nav_driver_title,
+                nav_driver_sub,
+                nav_auto_title,
+                nav_auto_sub,
+                privacy_card_title,
+                privacy_card_desc,
+                // Cleaner Tab
+                cleaner_title,
+                cleaner_subtitle,
+                btn_analyze_system,
+                btn_start_clean,
+                kpi_space_found,
+                kpi_waiting_scan,
+                kpi_locked_files,
+                kpi_locked_sub,
+                kpi_space_freed,
+                kpi_no_clean_yet,
+                kpi_active_rules,
+                kpi_active_rules_sub,
+                grp_win_sys,
+                grp_explorer,
+                grp_browsers,
+                grp_apps,
+                cleaner_categories_hdr,
+                btn_all,
+                btn_none,
+                flt_all,
+                flt_system,
+                flt_explorer,
+                flt_browser,
+                flt_app,
+                cleaner_details_hdr,
+                cleaner_scanning_msg,
+                cleaner_empty_clean_title,
+                cleaner_empty_clean_desc,
+                cleaner_ready_title,
+                cleaner_ready_desc,
+                cleaner_show_files,
+                badge_in_use,
+                badge_ready_ok,
+                banner_skipped_suffix,
+                banner_locked_suffix,
+                kpi_files_unit,
+                // Registry Tab
+                reg_title,
+                reg_subtitle,
+                btn_scan_reg,
+                btn_export_reg,
+                btn_backup_fix_reg,
+                reg_hive_categories,
+                reg_last_backup_prefix,
+                reg_empty_title,
+                reg_empty_desc,
+                reg_path_prefix,
+                banner_fixed_suffix,
+                reg_scanning_msg,
+                reg_fixing_msg,
+                // Startup Tab
+                startup_title,
+                startup_subtitle,
+                btn_refresh_list,
+                badge_total,
+                badge_active,
+                badge_disabled,
+                lbl_filter,
+                startup_filter_hint,
+                pill_enabled,
+                pill_disabled,
+                btn_enable,
+                btn_disable,
+                btn_delete,
+                lbl_command,
+                banner_startup_deleted,
+                lbl_backup,
+                // Uninstaller Tab
+                uninst_title,
+                uninst_subtitle,
+                badge_apps_detected,
+                uninst_filter_hint,
+                btn_uninstall,
+                // Wiper Tab
+                wiper_title,
+                wiper_subtitle,
+                wiper_step1_hdr,
+                wiper_drive_prefix,
+                wiper_used_summary,
+                wiper_step2_hdr,
+                wiper_mft_checkbox,
+                wiper_limit_checkbox,
+                wiper_full_free_badge,
+                btn_start_wipe,
+                btn_stop_wipe,
+                wiper_safety_note,
+                // Software Updater Tab
+                soft_title,
+                soft_subtitle,
+                btn_check_updates,
+                btn_upgrade_all,
+                kpi_updates_avail,
+                kpi_updates_sub,
+                kpi_winget_engine,
+                kpi_prop_servers,
+                kpi_prop_servers_sub,
+                soft_filter_hint,
+                soft_scanning_msg,
+                soft_all_up_to_date,
+                badge_current_ver,
+                badge_new_ver,
+                btn_upgrade_single,
+                kpi_winget_subtitle,
+                kpi_prop_servers_val,
+                lbl_package_source,
+                // Driver Updater Tab
+                drv_title,
+                drv_subtitle,
+                btn_scan_wu_drivers,
+                btn_install_wu_drivers,
+                kpi_wu_drivers,
+                kpi_pnp_drivers,
+                kpi_whql_cert,
+                kpi_whql_sub,
+                drv_filter_hint,
+                drv_scanning_msg,
+                drv_wu_pending_hdr,
+                badge_new_wu_driver,
+                drv_pnp_installed_hdr,
+                badge_whql_signed,
+                drv_installing_msg,
+                // Automation Tab
+                auto_title,
+                auto_subtitle,
+                sched_card_hdr,
+                badge_zero_ram_idle,
+                lbl_task_status,
+                badge_sched_active,
+                badge_sched_inactive,
+                lbl_next_run,
+                lbl_exec_freq,
+                lbl_time_hhmm,
+                sched_uac_checkbox,
+                btn_save_task,
+                btn_test_silent,
+                btn_remove_task,
+                sched_logs_hdr,
+                sched_logs_empty,
+                mon_card_hdr,
+                badge_zero_cpu,
+                btn_start_monitor,
+                btn_stop_monitor,
+                badge_kernel_events,
+                mon_auto_browser_cb,
+                mon_watched_paths_hdr,
+                mon_live_feed_hdr,
+                mon_empty_title,
+                mon_empty_desc,
+                banner_monitor_active,
+                banner_monitor_stopped,
+                auto_running_silent_msg,
+            );
+        }
+    }
+
+    #[test]
+    fn test_all_rules_localized_in_all_languages() {
+        let rules = default_clean_rules();
+        for &lang in Language::all() {
+            if lang == Language::Italian {
+                continue;
+            }
+            for rule in &rules {
+                let loc = lang.localize_rule(rule.id);
+                assert!(
+                    loc.is_some(),
+                    "Missing localization for rule ID {} in {:?}",
+                    rule.id,
+                    lang
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_all_reg_categories_localized_in_all_languages() {
+        for &lang in Language::all() {
+            for &cat in RegistryCategory::all() {
+                let (title, desc) = lang.localize_reg_category(cat);
+                assert!(!title.is_empty());
+                assert!(!desc.is_empty());
+            }
+        }
+    }
+}
+
