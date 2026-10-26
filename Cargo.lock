@@ -2809,7 +2809,7 @@ dependencies = [
 
 [[package]]
 name = "rustcleaner"
-version = "1.4.0-alpha"
+version = "1.4.1-alpha"
 dependencies = [
  "chrono",
  "clap",

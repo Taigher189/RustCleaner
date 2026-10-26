@@ -24,7 +24,7 @@ use std::sync::{Arc, Mutex};
 #[derive(Parser)]
 #[command(
     name = "rustcleaner",
-    version = "1.4.0-alpha",
+    version = "1.4.1-alpha",
     about = "[MEGA ALPHA] Utility di pulizia, aggiornamento e ottimizzazione per Windows scritta in Rust (Zero Telemetria, 0 MB RAM in background)"
 )]
 struct Cli {
@@ -137,7 +137,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 viewport: eframe::egui::ViewportBuilder::default()
                     .with_inner_size([gui::DEFAULT_WINDOW_WIDTH, gui::DEFAULT_WINDOW_HEIGHT])
                     .with_min_inner_size([gui::MIN_WINDOW_WIDTH, gui::MIN_WINDOW_HEIGHT])
-                    .with_title("RustCleaner v1.4.0-alpha [MEGA ALPHA] — Zero-Telemetry Windows Optimizer"),
+                    .with_title("RustCleaner v1.4.1-alpha [MEGA ALPHA] — Zero-Telemetry Windows Optimizer"),
                 ..Default::default()
             };
             eframe::run_native(

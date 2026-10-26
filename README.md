@@ -1,6 +1,6 @@
 # 🦀 RustCleaner
 
-[![Status: Alpha](https://img.shields.io/badge/Status-v1.4.0--alpha-red?style=for-the-badge)](#)
+[![Status: Alpha](https://img.shields.io/badge/Status-v1.4.1--alpha-red?style=for-the-badge)](#)
 [![Rust](https://img.shields.io/badge/Language-Rust%202021-orange?style=for-the-badge&logo=rust)](https://www.rust-lang.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(x64)-0078D6?style=for-the-badge&logo=windows)](https://microsoft.com/windows)
 [![Privacy](https://img.shields.io/badge/Privacy-Zero%20Telemetry%20%E2%80%A2%200%20MB%20Idle%20RAM-10B981?style=for-the-badge)](#)
