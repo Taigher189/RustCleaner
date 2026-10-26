@@ -2,7 +2,7 @@
 name = "rustcleaner"
 version = "1.5.0-alpha"
 edition = "2021"
-description = "[MEGA ALPHA] Lightweight, standalone Windows system cleaner, registry maintenance utility with automatic .reg backup, startup/uninstaller manager, and low-level free space wiper written in Rust."
+description = "Lightweight, zero-telemetry Windows system optimizer, deep residual uninstaller, Windows 11 decrapifier, registry cleaner, and disk sanitizer written in Rust."
 authors = ["Taigher189"]
 license = "MIT"
 readme = "README.md"
@@ -32,4 +32,3 @@ chrono = "0.4"
 rand = "0.8"
 glob = "0.3"
 notify = "6.1"
-

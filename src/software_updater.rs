@@ -1,4 +1,5 @@
 //! 1. Software Updater (Winget Wrapper — Zero Proprietary Databases)
+//!
 //! Executes Microsoft's official `winget` (Windows Package Manager) in the background,
 //! parses available software updates, and allows one-click single or batch (`--all --silent`) upgrades.
 
@@ -83,6 +84,11 @@ pub fn check_for_updates() -> WingetScanReport {
         updates,
         raw_message,
     }
+}
+
+/// Alias for `parse_winget_upgrade_output`
+pub fn parse_winget_table(stdout: &str) -> Vec<WingetPackageUpdate> {
+    parse_winget_upgrade_output(stdout)
 }
 
 /// Parses Winget's fixed-width UTF-8 table output (supporting both English and Italian headers).

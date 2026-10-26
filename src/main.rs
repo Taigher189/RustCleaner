@@ -26,7 +26,7 @@ use std::sync::{Arc, Mutex};
 #[derive(Parser)]
 #[command(
     name = "rustcleaner",
-    version = "1.4.0-alpha",
+    version = env!("CARGO_PKG_VERSION"),
     about = "[MEGA ALPHA] Utility di pulizia, aggiornamento e ottimizzazione per Windows scritta in Rust (Zero Telemetria, 0 MB RAM in background)"
 )]
 struct Cli {
@@ -137,9 +137,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         None => {
             let native_options = eframe::NativeOptions {
                 viewport: eframe::egui::ViewportBuilder::default()
-                    .with_inner_size([1220.0, 750.0])
-                    .with_min_inner_size([1020.0, 640.0])
-                    .with_title("RustCleaner v1.4.0-alpha [MEGA ALPHA] — Zero-Telemetry Windows Optimizer"),
+                    .with_inner_size([gui::DEFAULT_WINDOW_WIDTH, gui::DEFAULT_WINDOW_HEIGHT])
+                    .with_min_inner_size([gui::MIN_WINDOW_WIDTH, gui::MIN_WINDOW_HEIGHT])
+                    .with_title("RustCleaner v1.4.1-alpha [MEGA ALPHA] — Zero-Telemetry Windows Optimizer"),
                 ..Default::default()
             };
             eframe::run_native(
@@ -263,7 +263,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let cancel = Arc::new(AtomicBool::new(false));
             let written =
                 wiper::wipe_free_space(&drive, alg, true, Some(limit_mb), prog.clone(), cancel)?;
-            let final_msg = prog.lock().unwrap().status_message.clone();
+            let final_msg = prog
+                .lock()
+                .map(|p| p.status_message.clone())
+                .unwrap_or_else(|_| "Bonifica terminata.".to_string());
             println!("{final_msg} (Byte scritti: {written})");
         }
         Some(Commands::SoftwareUpdates) => {

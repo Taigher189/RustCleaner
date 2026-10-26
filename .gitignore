@@ -17,3 +17,6 @@
 .idea/
 .DS_Store
 Thumbs.db
+
+# Ephemeral teamwork run logs
+/.agents/teamwork/

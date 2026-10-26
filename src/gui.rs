@@ -43,6 +43,42 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 // ============================================================================
+// UI/UX LAYOUT CONSTANTS & RESPONSIVE BREAKPOINTS
+// ============================================================================
+/// Minimum height for Bento KPI summary cards to guarantee visual parity across all 7 languages.
+pub const MIN_KPI_CARD_HEIGHT: f32 = 78.0;
+
+/// Screen width breakpoint below which the header subtitle collapses to preserve horizontal space.
+pub const HEADER_SUBTITLE_BREAKPOINT: f32 = 1150.0;
+
+/// Screen width breakpoint below which the zero-telemetry badge collapses to prevent clipping.
+pub const HEADER_BADGE_BREAKPOINT: f32 = 1050.0;
+
+/// Minimum supported inner window width for RustCleaner desktop GUI (1020px).
+pub const MIN_WINDOW_WIDTH: f32 = 1020.0;
+
+/// Minimum supported inner window height for RustCleaner desktop GUI (640px).
+pub const MIN_WINDOW_HEIGHT: f32 = 640.0;
+
+/// Default launch inner window width (1220px).
+pub const DEFAULT_WINDOW_WIDTH: f32 = 1220.0;
+
+/// Default launch inner window height (750px).
+pub const DEFAULT_WINDOW_HEIGHT: f32 = 750.0;
+
+/// Returns true if the screen width triggers the compact header mode (collapsing subtitle).
+#[inline]
+pub fn is_compact_header(screen_w: f32) -> bool {
+    screen_w < HEADER_SUBTITLE_BREAKPOINT
+}
+
+/// Returns true if the screen width triggers the ultra-compact header mode (collapsing telemetry badge).
+#[inline]
+pub fn is_ultra_compact(screen_w: f32) -> bool {
+    screen_w < HEADER_BADGE_BREAKPOINT
+}
+
+// ============================================================================
 // UI/UX PRO MAX — DUAL-THEME SEMANTIC PALETTE (Dark OLED & Crisp Light Mode)
 // ============================================================================
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -182,6 +218,11 @@ enum ButtonVariant {
     Danger,
 }
 
+pub type RegFixResult = (
+    Result<crate::registry::RegistryFixReport, String>,
+    Option<Vec<RegistryIssue>>,
+);
+
 pub struct RustCleanerApp {
     pub fonts_initialized: bool,
     pub applied_theme: Option<ThemeMode>,
@@ -205,6 +246,9 @@ pub struct RustCleanerApp {
     pub reg_filter: String,
     pub reg_backup_dir: PathBuf,
     pub reg_last_backup: Option<PathBuf>,
+    pub reg_busy: bool,
+    pub reg_scan_rx: Arc<Mutex<Option<Vec<RegistryIssue>>>>,
+    pub reg_fix_rx: Arc<Mutex<Option<RegFixResult>>>,
 
     // 3. Startup & Uninstaller State
     pub startup_entries: Vec<StartupEntry>,
@@ -233,6 +277,7 @@ pub struct RustCleanerApp {
     pub driver_report: Option<DriverScanReport>,
     pub driver_busy: bool,
     pub driver_rx: Arc<Mutex<Option<DriverScanReport>>>,
+    pub driver_action_rx: Arc<Mutex<Option<Result<String, String>>>>,
     pub driver_filter: String,
 
     // 7. Zero-RAM Scheduler (`schtasks.exe`) & Zero-Polling Kernel Monitor (`notify`)
@@ -241,6 +286,8 @@ pub struct RustCleanerApp {
     pub schedule_time_hhmm: String,
     pub schedule_highest_uac: bool,
     pub schedule_logs: Vec<String>,
+    pub silent_clean_busy: bool,
+    pub silent_clean_rx: Arc<Mutex<Option<Result<String, String>>>>,
     pub monitor_state: Arc<Mutex<RealtimeMonitorState>>,
     pub monitor_stop_flag: Arc<AtomicBool>,
 
@@ -309,6 +356,9 @@ impl Default for RustCleanerApp {
             reg_filter: String::new(),
             reg_backup_dir: backup_dir,
             reg_last_backup: None,
+            reg_busy: false,
+            reg_scan_rx: Arc::new(Mutex::new(None)),
+            reg_fix_rx: Arc::new(Mutex::new(None)),
             startup_entries: list_startup_entries(),
             startup_filter: String::new(),
             installed_apps: list_installed_apps(),
@@ -329,12 +379,15 @@ impl Default for RustCleanerApp {
             driver_report: None,
             driver_busy: false,
             driver_rx: Arc::new(Mutex::new(None)),
+            driver_action_rx: Arc::new(Mutex::new(None)),
             driver_filter: String::new(),
             schedule_status: query_scheduled_task(),
             schedule_freq: ScheduleFrequency::Weekly,
             schedule_time_hhmm: "18:00".to_string(),
             schedule_highest_uac: false,
             schedule_logs: read_scheduled_logs(),
+            silent_clean_busy: false,
+            silent_clean_rx: Arc::new(Mutex::new(None)),
             monitor_state: Arc::new(Mutex::new(RealtimeMonitorState::default())),
             monitor_stop_flag: Arc::new(AtomicBool::new(false)),
             disk_preset: ScanTargetPreset::UserProfileMediaAndDocs,
@@ -722,31 +775,46 @@ fn draw_action_button(
     let (bg_fill, border_stroke, text_color) = match variant {
         ButtonVariant::PrimaryScan => (
             if pal.is_dark {
-                Color32::from_rgb(18, 42, 68)
+                Color32::from_rgb(18, 42, 68) // #122A44
             } else {
-                Color32::from_rgb(224, 242, 254)
+                Color32::from_rgb(224, 242, 254) // #E0F2FE Sky 100
             },
             Stroke::new(1.2_f32, pal.accent_cyan),
-            pal.accent_cyan,
+            if pal.is_dark {
+                pal.accent_cyan // #38BDF8 -> 6.86:1 AA Pass
+            } else {
+                Color32::from_rgb(7, 89, 133) // #075985 Sky 800 -> 6.55:1 AA Pass
+            },
         ),
         ButtonVariant::ExecuteBrand => (
-            pal.accent_rust,
-            Stroke::new(1.0_f32, pal.accent_rust),
-            Color32::WHITE,
+            Color32::from_rgb(194, 65, 12), // #C2410C Orange 700 -> 5.19:1 AA Pass in both modes
+            Stroke::new(
+                1.0_f32,
+                if pal.is_dark {
+                    Color32::from_rgb(234, 88, 12) // #EA580C Orange 600
+                } else {
+                    Color32::from_rgb(194, 65, 12) // #C2410C Orange 700
+                },
+            ),
+            Color32::WHITE, // #FFFFFF
         ),
         ButtonVariant::Secondary => (
             pal.bg_card_subtle,
             Stroke::new(1.0_f32, pal.border_strong),
-            pal.text_primary,
+            pal.text_primary, // > 15:1 AAA Pass
         ),
         ButtonVariant::Danger => (
             if pal.is_dark {
-                Color32::from_rgb(69, 20, 26)
+                Color32::from_rgb(69, 20, 26) // #45141A Deep Red
             } else {
-                Color32::from_rgb(254, 226, 226)
+                Color32::from_rgb(254, 226, 226) // #FEE2E2 Red 100
             },
             Stroke::new(1.2_f32, pal.accent_red),
-            pal.accent_red,
+            if pal.is_dark {
+                Color32::from_rgb(248, 113, 113) // #F87171 Red 400 -> 5.54:1 AA Pass
+            } else {
+                Color32::from_rgb(185, 28, 28) // #B91C1C Red 700 -> 5.24:1 AA Pass
+            },
         ),
     };
 
@@ -818,6 +886,7 @@ fn draw_kpi_card(
         .inner_margin(egui::Margin::symmetric(14, 11))
         .show(ui, |ui| {
             ui.set_width((avail_w - 28.0).max(110.0));
+            ui.set_min_height(MIN_KPI_CARD_HEIGHT); // Guarantees row height parity across all languages
             ui.horizontal(|ui| {
                 let (icon_rect, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), Sense::hover());
                 paint_vector_icon(ui.painter(), icon_rect, icon, accent);
@@ -1036,19 +1105,21 @@ impl eframe::App for RustCleanerApp {
                 self.cleaner_busy = false;
                 if was_clean {
                     self.status_banner = format!(
-                        "{}: {} ({}) — {} skipped.",
+                        "{}: {} ({}) — {} {}.",
                         s.kpi_space_freed,
                         summary.total_files_deleted,
                         format_bytes(summary.total_bytes_deleted),
-                        summary.total_skipped_locked
+                        summary.total_skipped_locked,
+                        s.banner_skipped_suffix
                     );
                 } else {
                     self.status_banner = format!(
-                        "{}: {} ({}) — {} locked.",
+                        "{}: {} ({}) — {} {}.",
                         s.kpi_space_found,
                         summary.total_files_found,
                         format_bytes(summary.total_bytes_found),
-                        summary.total_skipped_locked
+                        summary.total_skipped_locked,
+                        s.banner_locked_suffix
                     );
                 }
                 self.clean_summary = Some(summary);
@@ -1101,6 +1172,72 @@ impl eframe::App for RustCleanerApp {
             }
         }
 
+        // Poll background Registry scan results
+        if let Ok(mut guard) = self.reg_scan_rx.lock() {
+            if let Some(issues) = guard.take() {
+                self.reg_busy = false;
+                let count = issues.len();
+                self.reg_issues = issues;
+                self.status_banner = format!("{} ({})", s.reg_title, count);
+            }
+        }
+
+        // Poll background Registry fix results
+        if let Ok(mut guard) = self.reg_fix_rx.lock() {
+            if let Some((fix_res, post_scan)) = guard.take() {
+                self.reg_busy = false;
+                match fix_res {
+                    Ok(report) => {
+                        self.reg_last_backup = Some(report.backup_file.clone());
+                        self.status_banner = format!(
+                            "{} '{}' ({} {}).",
+                            s.reg_last_backup_prefix,
+                            report.backup_file.display(),
+                            report.fixed_count,
+                            s.banner_fixed_suffix,
+                        );
+                        if let Some(issues) = post_scan {
+                            self.reg_issues = issues;
+                        }
+                    }
+                    Err(e) => self.status_banner = e,
+                }
+            }
+        }
+
+        // Poll background Driver install action results
+        let drv_action_msg = self
+            .driver_action_rx
+            .lock()
+            .ok()
+            .and_then(|mut g| g.take());
+        if let Some(res) = drv_action_msg {
+            self.driver_busy = false;
+            match res {
+                Ok(msg) => {
+                    self.status_banner = msg;
+                    self.start_driver_scan(true);
+                }
+                Err(e) => {
+                    self.status_banner = e;
+                }
+            }
+        }
+
+        // Poll background Silent Clean test results
+        if let Ok(mut guard) = self.silent_clean_rx.lock() {
+            if let Some(res) = guard.take() {
+                self.silent_clean_busy = false;
+                match res {
+                    Ok(msg) => {
+                        self.status_banner = msg;
+                        self.schedule_logs = read_scheduled_logs();
+                    }
+                    Err(e) => self.status_banner = e,
+                }
+            }
+        }
+
         let wiper_running = self
             .wipe_progress
             .lock()
@@ -1117,6 +1254,8 @@ impl eframe::App for RustCleanerApp {
             || wiper_running
             || self.winget_busy
             || self.driver_busy
+            || self.reg_busy
+            || self.silent_clean_busy
             || monitor_active
         {
             ctx.request_repaint_after(std::time::Duration::from_millis(250));
@@ -1154,6 +1293,10 @@ impl eframe::App for RustCleanerApp {
                             );
                         });
 
+                    let screen_w = ctx.screen_rect().width();
+                    let is_compact_header = is_compact_header(screen_w);
+                    let is_ultra_compact = is_ultra_compact(screen_w);
+
                     ui.add_space(4.0);
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing.y = 2.0;
@@ -1175,23 +1318,27 @@ impl eframe::App for RustCleanerApp {
                                 ),
                                 pal.accent_rust,
                             );
-                            draw_pill_badge(
-                                ui,
-                                s.badge_zero_telemetry,
-                                Color32::from_rgba_unmultiplied(
-                                    pal.accent_emerald.r(),
-                                    pal.accent_emerald.g(),
-                                    pal.accent_emerald.b(),
-                                    28,
-                                ),
-                                pal.accent_emerald,
-                            );
+                            if !is_ultra_compact {
+                                draw_pill_badge(
+                                    ui,
+                                    s.badge_zero_telemetry,
+                                    Color32::from_rgba_unmultiplied(
+                                        pal.accent_emerald.r(),
+                                        pal.accent_emerald.g(),
+                                        pal.accent_emerald.b(),
+                                        28,
+                                    ),
+                                    pal.accent_emerald,
+                                );
+                            }
                         });
-                        ui.label(
-                            RichText::new(s.header_subtitle)
-                                .size(11.5)
-                                .color(pal.text_secondary),
-                        );
+                        if !is_compact_header {
+                            ui.label(
+                                RichText::new(s.header_subtitle)
+                                    .size(11.5)
+                                    .color(pal.text_secondary),
+                            );
+                        }
                     });
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1209,11 +1356,17 @@ impl eframe::App for RustCleanerApp {
                                 pal.accent_emerald,
                             );
                         } else {
+                            let uac_text_color = if pal.is_dark {
+                                Color32::from_rgb(15, 23, 42) // #0F172A Slate 900 -> 8.28:1 AAA Pass on #F59E0B
+                            } else {
+                                Color32::WHITE // #FFFFFF -> 5.12:1 AA Pass on #B45309
+                            };
+
                             let uac_btn = egui::Button::new(
                                 RichText::new(s.btn_elevate_uac)
                                     .size(11.5)
                                     .strong()
-                                    .color(Color32::WHITE),
+                                    .color(uac_text_color),
                             )
                             .fill(pal.accent_amber)
                             .corner_radius(CornerRadius::same(14));
@@ -1684,10 +1837,10 @@ impl RustCleanerApp {
             if let Some(sum) = &self.clean_summary {
                 (
                     format_bytes(sum.total_bytes_found),
-                    format!("{} files", sum.total_files_found),
+                    format!("{} {}", sum.total_files_found, s.kpi_files_unit),
                     format!("{}", sum.total_skipped_locked),
                     format_bytes(sum.total_bytes_deleted),
-                    format!("{} files", sum.total_files_deleted),
+                    format!("{} {}", sum.total_files_deleted, s.kpi_files_unit),
                 )
             } else {
                 (
@@ -2174,6 +2327,51 @@ impl RustCleanerApp {
         });
     }
 
+    fn start_reg_scan(&mut self) {
+        let s = self.language.strings();
+        self.reg_busy = true;
+        self.status_banner = s.reg_scanning_msg.to_string();
+        let active_cats: Vec<RegistryCategory> = self
+            .reg_categories
+            .iter()
+            .filter(|(_, en)| *en)
+            .map(|(c, _)| *c)
+            .collect();
+        let rx = Arc::clone(&self.reg_scan_rx);
+        thread::spawn(move || {
+            let issues = scan_registry(&active_cats);
+            if let Ok(mut g) = rx.lock() {
+                *g = Some(issues);
+            }
+        });
+    }
+
+    fn start_reg_fix(&mut self) {
+        let s = self.language.strings();
+        self.reg_busy = true;
+        self.status_banner = s.reg_fixing_msg.to_string();
+        let issues_clone = self.reg_issues.clone();
+        let backup_dir = self.reg_backup_dir.clone();
+        let active_cats: Vec<RegistryCategory> = self
+            .reg_categories
+            .iter()
+            .filter(|(_, en)| *en)
+            .map(|(c, _)| *c)
+            .collect();
+        let rx = Arc::clone(&self.reg_fix_rx);
+        thread::spawn(move || {
+            let fix_res = backup_and_fix_registry(&issues_clone, &backup_dir);
+            let post_scan = if fix_res.is_ok() {
+                Some(scan_registry(&active_cats))
+            } else {
+                None
+            };
+            if let Ok(mut g) = rx.lock() {
+                *g = Some((fix_res, post_scan));
+            }
+        });
+    }
+
     fn render_registry_tab(&mut self, ui: &mut egui::Ui, pal: &ThemePalette) {
         let s = self.language.strings();
 
@@ -2199,27 +2397,9 @@ impl RustCleanerApp {
                     s.btn_backup_fix_reg,
                     VectorIcon::CheckShield,
                     ButtonVariant::ExecuteBrand,
-                    !self.reg_issues.is_empty(),
+                    !self.reg_busy && !self.reg_issues.is_empty(),
                 ) {
-                    match backup_and_fix_registry(&self.reg_issues, &self.reg_backup_dir) {
-                        Ok(report) => {
-                            self.reg_last_backup = Some(report.backup_file.clone());
-                            self.status_banner = format!(
-                                "{} '{}' ({} fixed).",
-                                s.reg_last_backup_prefix,
-                                report.backup_file.display(),
-                                report.fixed_count,
-                            );
-                            let active_cats: Vec<RegistryCategory> = self
-                                .reg_categories
-                                .iter()
-                                .filter(|(_, en)| *en)
-                                .map(|(c, _)| *c)
-                                .collect();
-                            self.reg_issues = scan_registry(&active_cats);
-                        }
-                        Err(e) => self.status_banner = e,
-                    }
+                    self.start_reg_fix();
                 }
 
                 if draw_action_button(
@@ -2228,7 +2408,7 @@ impl RustCleanerApp {
                     s.btn_export_reg,
                     VectorIcon::DriveCylinder,
                     ButtonVariant::Secondary,
-                    !self.reg_issues.is_empty(),
+                    !self.reg_busy && !self.reg_issues.is_empty(),
                 ) {
                     match export_reg_backup(&self.reg_issues, &self.reg_backup_dir) {
                         Ok(path) => {
@@ -2246,17 +2426,9 @@ impl RustCleanerApp {
                     s.btn_scan_reg,
                     VectorIcon::SearchLens,
                     ButtonVariant::PrimaryScan,
-                    true,
+                    !self.reg_busy,
                 ) {
-                    let active_cats: Vec<RegistryCategory> = self
-                        .reg_categories
-                        .iter()
-                        .filter(|(_, en)| *en)
-                        .map(|(c, _)| *c)
-                        .collect();
-                    self.reg_issues = scan_registry(&active_cats);
-                    self.status_banner =
-                        format!("{} ({})", s.reg_title, self.reg_issues.len());
+                    self.start_reg_scan();
                 }
             });
         });
@@ -2368,7 +2540,18 @@ impl RustCleanerApp {
                 .id_salt("reg_issues_scroll")
                 .max_height((ui.available_height() - 6.0).max(180.0))
                 .show(ui, |ui| {
-                    if self.reg_issues.is_empty() {
+                    if self.reg_busy {
+                        ui.vertical_centered(|ui| {
+                            ui.add_space(40.0);
+                            ui.spinner();
+                            ui.add_space(10.0);
+                            ui.label(
+                                RichText::new(s.reg_scanning_msg)
+                                    .size(13.5)
+                                    .color(pal.text_secondary),
+                            );
+                        });
+                    } else if self.reg_issues.is_empty() {
                         draw_empty_state(
                             ui,
                             pal,
@@ -2694,9 +2877,15 @@ impl RustCleanerApp {
             }
         }
         if let Some(entry) = delete_req {
-            match delete_startup_entry(&entry) {
-                Ok(()) => {
-                    self.status_banner = format!("'{}' deleted.", entry.name);
+            match delete_startup_entry(&entry, Some(&self.reg_backup_dir)) {
+                Ok(backup_path) => {
+                    self.status_banner = format!(
+                        "'{}' {} ({}: {}).",
+                        entry.name,
+                        s.banner_startup_deleted,
+                        s.lbl_backup,
+                        backup_path.display()
+                    );
                     self.startup_entries = list_startup_entries();
                 }
                 Err(e) => self.status_banner = e,
@@ -3866,7 +4055,11 @@ impl RustCleanerApp {
         });
 
         ui.add_space(10.0);
-        let prog_snapshot = self.wipe_progress.lock().unwrap().clone();
+        let prog_snapshot = self
+            .wipe_progress
+            .lock()
+            .map(|p| p.clone())
+            .unwrap_or_default();
 
         card_frame(pal).show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -4050,7 +4243,7 @@ impl RustCleanerApp {
                 pal,
                 s.kpi_winget_engine,
                 &ver_str,
-                "Windows Package Manager",
+                s.kpi_winget_subtitle,
                 pal.accent_emerald,
                 VectorIcon::CheckShield,
             );
@@ -4058,7 +4251,7 @@ impl RustCleanerApp {
                 &mut cols[2],
                 pal,
                 s.kpi_prop_servers,
-                "0 (100% Free)",
+                s.kpi_prop_servers_val,
                 s.kpi_prop_servers_sub,
                 pal.accent_purple,
                 VectorIcon::BrandShield,
@@ -4177,8 +4370,8 @@ impl RustCleanerApp {
                                                         });
                                                         ui.label(
                                                             RichText::new(format!(
-                                                                "ID: {} • Source: {}",
-                                                                pkg.id, pkg.source
+                                                                "ID: {} • {}: {}",
+                                                                pkg.id, s.lbl_package_source, pkg.source
                                                             ))
                                                             .size(10.5)
                                                             .monospace()
@@ -4245,6 +4438,19 @@ impl RustCleanerApp {
         });
     }
 
+    fn start_driver_install(&mut self) {
+        let s = self.language.strings();
+        self.driver_busy = true;
+        self.status_banner = s.drv_installing_msg.to_string();
+        let rx = Arc::clone(&self.driver_action_rx);
+        thread::spawn(move || {
+            let res = install_wu_driver_updates();
+            if let Ok(mut g) = rx.lock() {
+                *g = Some(res);
+            }
+        });
+    }
+
     fn render_driver_updater_tab(&mut self, ui: &mut egui::Ui, pal: &ThemePalette) {
         let s = self.language.strings();
 
@@ -4278,13 +4484,7 @@ impl RustCleanerApp {
                     ButtonVariant::ExecuteBrand,
                     !self.driver_busy && pending_count > 0,
                 ) {
-                    match install_wu_driver_updates() {
-                        Ok(msg) => {
-                            self.status_banner = msg;
-                            self.start_driver_scan(true);
-                        }
-                        Err(e) => self.status_banner = e,
-                    }
+                    self.start_driver_install();
                 }
 
                 if draw_action_button(
@@ -4520,6 +4720,19 @@ impl RustCleanerApp {
         });
     }
 
+    fn start_silent_clean_test(&mut self) {
+        let s = self.language.strings();
+        self.silent_clean_busy = true;
+        self.status_banner = s.auto_running_silent_msg.to_string();
+        let rx = Arc::clone(&self.silent_clean_rx);
+        thread::spawn(move || {
+            let res = run_silent_clean_and_log();
+            if let Ok(mut g) = rx.lock() {
+                *g = Some(res);
+            }
+        });
+    }
+
     // === 8. AUTOMATION (ZERO-RAM SCHTASKS) & KERNEL MONITOR (NOTIFY) TAB ===
     fn render_automation_monitor_tab(&mut self, ui: &mut egui::Ui, pal: &ThemePalette) {
         let s = self.language.strings();
@@ -4676,15 +4889,9 @@ impl RustCleanerApp {
                         s.btn_test_silent,
                         VectorIcon::PlayRun,
                         ButtonVariant::Secondary,
-                        true,
+                        !self.silent_clean_busy,
                     ) {
-                        match run_silent_clean_and_log() {
-                            Ok(msg) => {
-                                self.status_banner = msg;
-                                self.schedule_logs = read_scheduled_logs();
-                            }
-                            Err(e) => self.status_banner = e,
-                        }
+                        self.start_silent_clean_test();
                     }
 
                     if self.schedule_status.exists
@@ -4740,7 +4947,11 @@ impl RustCleanerApp {
             // RIGHT CARD: Real-Time Kernel Event Watcher (`notify` / `ReadDirectoryChangesW`)
             card_frame(pal).show(&mut cols[1], |ui| {
                 ui.set_height(col_h);
-                let mon_snap = self.monitor_state.lock().unwrap().clone();
+                let mon_snap = self
+                    .monitor_state
+                    .lock()
+                    .map(|m| m.clone())
+                    .unwrap_or_default();
 
                 ui.horizontal(|ui| {
                     ui.label(
@@ -4778,8 +4989,7 @@ impl RustCleanerApp {
                                 Arc::clone(&self.monitor_state),
                                 Arc::clone(&self.monitor_stop_flag),
                             );
-                            self.status_banner =
-                                "ReadDirectoryChangesW active (0% CPU polling).".to_string();
+                            self.status_banner = s.banner_monitor_active.to_string();
                         }
                     } else if draw_action_button(
                         ui,
@@ -4790,7 +5000,7 @@ impl RustCleanerApp {
                         true,
                     ) {
                         self.monitor_stop_flag.store(true, Ordering::Relaxed);
-                        self.status_banner = "ReadDirectoryChangesW stopped.".to_string();
+                        self.status_banner = s.banner_monitor_stopped.to_string();
                     }
 
                     draw_pill_badge(
@@ -5221,12 +5431,10 @@ impl RustCleanerApp {
                 for grp in &mut rep.duplicate_groups {
                     let each_sz = grp.each_size_bytes;
                     grp.files.retain(|item| {
-                        if item.selected_for_deletion {
-                            if delete_analyzed_file(&item.path).is_ok() {
-                                deleted_count += 1;
-                                freed_bytes = freed_bytes.saturating_add(each_sz);
-                                return false;
-                            }
+                        if item.selected_for_deletion && delete_analyzed_file(&item.path).is_ok() {
+                            deleted_count += 1;
+                            freed_bytes = freed_bytes.saturating_add(each_sz);
+                            return false;
                         }
                         true
                     });

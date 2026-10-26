@@ -431,10 +431,25 @@ pub fn scan_registry(enabled_categories: &[RegistryCategory]) -> Vec<RegistryIss
     if enabled_categories.contains(&RegistryCategory::InstallerFolders) {
         let key_path = r"Software\Microsoft\Windows\CurrentVersion\Installer\Folders";
         if let Ok(key) = HiveRoot::Hklm.open_root().open_subkey_with_flags(key_path, KEY_READ) {
-            for (folder_path, _) in key.enum_values().flatten() {
+            for (folder_path, reg_val) in key.enum_values().flatten() {
                 let p = Path::new(&folder_path);
                 if folder_path.len() > 3 && !p.exists() {
-                    let orig = key.get_value::<String, _>(&folder_path).unwrap_or_default();
+                    let (orig, is_dword) = match reg_val.vtype {
+                        REG_DWORD => {
+                            let dword = if reg_val.bytes.len() >= 4 {
+                                u32::from_le_bytes(
+                                    reg_val.bytes[0..4].try_into().unwrap_or([0; 4]),
+                                )
+                            } else {
+                                1
+                            };
+                            (format!("{dword:08x}"), true)
+                        }
+                        _ => (
+                            key.get_value::<String, _>(&folder_path).unwrap_or_default(),
+                            false,
+                        ),
+                    };
                     issues.push(RegistryIssue {
                         selected: true,
                         category: RegistryCategory::InstallerFolders,
@@ -445,7 +460,7 @@ pub fn scan_registry(enabled_categories: &[RegistryCategory]) -> Vec<RegistryIss
                         action: RegTargetAction::DeleteValue {
                             value_name: folder_path,
                             original_data: orig,
-                            is_dword: false,
+                            is_dword,
                         },
                     });
                 }
@@ -456,7 +471,11 @@ pub fn scan_registry(enabled_categories: &[RegistryCategory]) -> Vec<RegistryIss
     issues
 }
 
-fn escape_reg_str(s: &str) -> String {
+/// Backward compatibility alias for `RegistryIssue`
+pub type RegProblem = RegistryIssue;
+
+/// Escapes a string for `.reg` file export.
+pub fn escape_reg_str(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
@@ -655,6 +674,28 @@ mod tests {
         assert!(text.starts_with("Windows Registry Editor Version 5.00"));
         assert!(text.contains(r#""C:\\Missing\\lib.dll"=dword:00000001"#));
         assert!(text.contains(r#"@="C:\\NonExistent\\app.exe""#));
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_category7_installer_folders_dword_backup() {
+        let temp_dir = std::env::temp_dir().join("rustcleaner_test_installer_backup");
+        let issue = RegistryIssue {
+            selected: true,
+            category: RegistryCategory::InstallerFolders,
+            problem_description: "Cartella Windows Installer non più esistente".to_string(),
+            data_reference: r"C:\Windows\Installer\{GUID}\".to_string(),
+            hive: HiveRoot::Hklm,
+            key_path: r"Software\Microsoft\Windows\CurrentVersion\Installer\Folders".to_string(),
+            action: RegTargetAction::DeleteValue {
+                value_name: r"C:\Windows\Installer\{GUID}\".to_string(),
+                original_data: "00000001".to_string(),
+                is_dword: true,
+            },
+        };
+        let path = export_reg_backup(&[issue], &temp_dir).expect("backup should succeed");
+        let text = fs::read_to_string(&path).expect("read backup");
+        assert!(text.contains(r#""C:\\Windows\\Installer\\{GUID}\\"=dword:00000001"#));
         let _ = fs::remove_dir_all(&temp_dir);
     }
 }

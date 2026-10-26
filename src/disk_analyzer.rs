@@ -286,7 +286,7 @@ pub fn run_disk_analysis(
     }
 
     // Sort large files largest-first and keep top 250
-    large_files.sort_by(|a, b| b.size_bytes.cmp(&a.size_bytes));
+    large_files.sort_by_key(|a| std::cmp::Reverse(a.size_bytes));
     if large_files.len() > 250 {
         large_files.truncate(250);
     }
@@ -303,7 +303,7 @@ pub fn run_disk_analysis(
             }
         })
         .collect();
-    categories.sort_by(|a, b| b.total_bytes.cmp(&a.total_bytes));
+    categories.sort_by_key(|a| std::cmp::Reverse(a.total_bytes));
 
     // === 3-STAGE DUPLICATE FINDER ===
     // Stage 1: Keep only size buckets with >= 2 files
@@ -327,8 +327,8 @@ pub fn run_disk_analysis(
                 }
             }
             fp_buckets
-                .into_iter()
-                .filter_map(|(_, grp)| if grp.len() >= 2 { Some((size, grp)) } else { None })
+                .into_values()
+                .filter_map(|grp| if grp.len() >= 2 { Some((size, grp)) } else { None })
                 .collect::<Vec<_>>()
         })
         .collect();
@@ -380,7 +380,7 @@ pub fn run_disk_analysis(
         .collect();
 
     // Sort duplicate groups by wasted space descending
-    duplicate_groups.sort_by(|a, b| b.wasted_bytes.cmp(&a.wasted_bytes));
+    duplicate_groups.sort_by_key(|a| std::cmp::Reverse(a.wasted_bytes));
     if duplicate_groups.len() > 250 {
         duplicate_groups.truncate(250);
     }
@@ -549,6 +549,7 @@ impl Sha256 {
 
     fn compress_block(&mut self, block: &[u8; 64]) {
         let mut w = [0u32; 64];
+        #[allow(clippy::chunks_exact_to_as_chunks)]
         for (i, chunk) in block.chunks_exact(4).enumerate() {
             w[i] = u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
         }
@@ -632,6 +633,7 @@ pub fn reveal_in_explorer(path: &Path) -> Result<(), String> {
 pub fn delete_analyzed_file(path: &Path) -> Result<(), String> {
     if let Ok(meta) = fs::metadata(path) {
         let mut perms = meta.permissions();
+        #[cfg_attr(windows, allow(clippy::permissions_set_readonly_false))]
         if perms.readonly() {
             perms.set_readonly(false);
             let _ = fs::set_permissions(path, perms);
@@ -701,7 +703,7 @@ mod tests {
         fs::write(&f3, vec![0x99u8; 4096]).unwrap();
 
         let cancel = Arc::new(AtomicBool::new(false));
-        let rep = run_disk_analysis(&[tmp.clone()], 100, 1, cancel);
+        let rep = run_disk_analysis(std::slice::from_ref(&tmp), 100, 1, cancel);
 
         assert_eq!(rep.duplicate_groups.len(), 1);
         assert_eq!(rep.duplicate_groups[0].files.len(), 2);
