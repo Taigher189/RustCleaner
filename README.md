@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/hero_banner.png" alt="RustCleaner Hero Banner" width="100%" />
+<img src="assets/hero_banner.png?v=1.5.0" alt="RustCleaner Hero Banner" width="100%" />
 
 <br/>
 
@@ -20,7 +20,7 @@
 ---
 
 ### 🎥 Watch RustCleaner in Action
-<img src="assets/demo.gif" alt="RustCleaner Animated Demo" width="100%" style="border-radius: 8px; border: 1px solid #2d3748;" />
+<img src="assets/demo.gif?v=1.5.0" alt="RustCleaner Animated Demo" width="100%" style="border-radius: 8px; border: 1px solid #2d3748;" />
 
 </div>
 

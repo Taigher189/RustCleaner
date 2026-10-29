@@ -39,11 +39,18 @@ FONT_SMALL = ImageFont.truetype("C:/Windows/Fonts/segoeui.ttf", 11)
 FONT_MONO = ImageFont.truetype("C:/Windows/Fonts/consola.ttf", 12)
 FONT_KPI_VAL = ImageFont.truetype("C:/Windows/Fonts/segoeuib.ttf", 24)
 FONT_HERO_TITLE = ImageFont.truetype("C:/Windows/Fonts/segoeuib.ttf", 44)
-FONT_HERO_SUB = ImageFont.truetype("C:/Windows/Fonts/segoeui.ttf", 20)
+FONT_HERO_SUB = ImageFont.truetype("C:/Windows/Fonts/segoeui.ttf", 18)
+FONT_PILL = ImageFont.truetype("C:/Windows/Fonts/segoeuib.ttf", 12)
+FONT_CARD_TITLE = ImageFont.truetype("C:/Windows/Fonts/segoeuib.ttf", 14)
+FONT_CARD_DESC = ImageFont.truetype("C:/Windows/Fonts/segoeui.ttf", 12)
+
+BG_CARD_BORDER = BORDER_SUBTLE
 
 W, H = 1200, 740
 
-def draw_pill(draw, x, y, text, fg_color, bg_alpha_color, font=FONT_SMALL):
+def draw_pill(draw, x, y, text, fg_color, bg_alpha_color=None, font=FONT_SMALL):
+    if bg_alpha_color is None:
+        bg_alpha_color = (fg_color[0], fg_color[1], fg_color[2], 30)
     bbox = font.getbbox(text)
     tw = bbox[2] - bbox[0]
     th = bbox[3] - bbox[1]
