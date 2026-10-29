@@ -112,6 +112,7 @@ pub struct WipeProgress {
     pub status_message: String,
     pub error: Option<String>,
     pub temp_file_path: Option<PathBuf>,
+    pub container_dir: Option<PathBuf>,
 }
 
 /// RAII Guard that guarantees removal of the temporary wipe directory even on panic or early cancellation.
@@ -268,6 +269,7 @@ pub fn wipe_free_space(
             p.status_message = format!("Inizializzazione bonifica su {drive_root}...");
             p.error = None;
             p.temp_file_path = Some(wipe_file_path.clone());
+            p.container_dir = Some(wipe_file_path.clone());
         }
     }
 

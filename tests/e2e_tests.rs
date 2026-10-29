@@ -345,7 +345,7 @@ fn tier1_wiper_cleans_up_temporary_container_via_raii_guard() {
         let progress = Arc::new(Mutex::new(wiper::WipeProgress::default()));
         // Pre-cancel to trigger immediate RAII cleanup path
         let cancel = Arc::new(AtomicBool::new(true));
-        let _ = wiper::wipe_free_space(drive_root, wiper::WipeAlgorithm::SimpleOnePassZero, false, Some(1), progress, cancel);
+        let _ = wiper::wipe_free_space(drive_root, wiper::WipeAlgorithm::SimpleOnePassZero, Some(1), progress, cancel);
 
         let temp_container = Path::new(drive_root).join(".rustcleaner_wipe_tmp");
         assert!(
@@ -694,7 +694,7 @@ fn tier2_wiper_zero_limit_boundary_handling() {
     if let Some(drive) = drives.first() {
         let prog = Arc::new(Mutex::new(wiper::WipeProgress::default()));
         let cancel = Arc::new(AtomicBool::new(false));
-        let res = wiper::wipe_free_space(&drive.root_path, wiper::WipeAlgorithm::SimpleOnePassZero, false, Some(0), prog, cancel);
+        let res = wiper::wipe_free_space(&drive.root_path, wiper::WipeAlgorithm::SimpleOnePassZero, Some(0), prog, cancel);
         assert!(res.is_ok() || res.is_err(), "Must handle zero limit safely");
     }
 }
@@ -710,10 +710,10 @@ fn tier2_wiper_non_existent_drive_returns_error() {
     let cancel = Arc::new(AtomicBool::new(false));
 
     if let Some(bad_drive) = non_existent_letter {
-        let res = wiper::wipe_free_space(&bad_drive, wiper::WipeAlgorithm::SimpleOnePassZero, false, Some(1), prog, cancel);
+        let res = wiper::wipe_free_space(&bad_drive, wiper::WipeAlgorithm::SimpleOnePassZero, Some(1), prog, cancel);
         assert!(res.is_err(), "Non-existent drive root {} must return Err", bad_drive);
     } else {
-        let res = wiper::wipe_free_space(r"9:\", wiper::WipeAlgorithm::SimpleOnePassZero, false, Some(1), prog, cancel);
+        let res = wiper::wipe_free_space(r"9:\", wiper::WipeAlgorithm::SimpleOnePassZero, Some(1), prog, cancel);
         assert!(res.is_err());
     }
 }
@@ -730,7 +730,7 @@ fn tier2_wiper_immediate_abort_on_pre_cancelled_flag() {
     if let Some(drive) = drives.first() {
         let prog = Arc::new(Mutex::new(wiper::WipeProgress::default()));
         let cancel = Arc::new(AtomicBool::new(true)); // Pre-cancelled
-        let written = wiper::wipe_free_space(&drive.root_path, wiper::WipeAlgorithm::SimpleOnePassZero, false, Some(10), prog.clone(), cancel).unwrap_or(0);
+        let written = wiper::wipe_free_space(&drive.root_path, wiper::WipeAlgorithm::SimpleOnePassZero, Some(10), prog.clone(), cancel).unwrap_or(0);
         assert_eq!(written, 0, "No bytes should be written when pre-cancelled");
         let p = prog.lock().unwrap();
         assert!(p.finished || !p.running);
@@ -747,7 +747,7 @@ fn tier2_wiper_aborts_promptly_on_mid_execution_cancellation() {
 
         let root = drive.root_path.clone();
         let handle = std::thread::spawn(move || {
-            wiper::wipe_free_space(&root, wiper::WipeAlgorithm::DodThreePass, true, Some(64), prog, cancel_clone)
+            wiper::wipe_free_space(&root, wiper::WipeAlgorithm::DodThreePass, Some(64), prog, cancel_clone)
         });
 
         std::thread::sleep(Duration::from_millis(2));
@@ -896,12 +896,12 @@ fn tier3_pairwise_cleaner_rule_expansion_adjacent_to_protected_paths() {
 fn tier3_pairwise_wiper_algorithms_with_and_without_mft_slack() {
     let drives = wiper::list_drives();
     if let Some(drive) = drives.first() {
-        for wipe_mft in [false, true] {
+        for alg in [wiper::WipeAlgorithm::SimpleOnePassZero, wiper::WipeAlgorithm::DodThreePass] {
             let prog = Arc::new(Mutex::new(wiper::WipeProgress::default()));
             let cancel = Arc::new(AtomicBool::new(true)); // Pre-cancel to test initialization
-            let _ = wiper::wipe_free_space(&drive.root_path, wiper::WipeAlgorithm::SimpleOnePassZero, wipe_mft, Some(1), prog, cancel);
+            let _ = wiper::wipe_free_space(&drive.root_path, alg, Some(1), prog, cancel);
             let container = Path::new(&drive.root_path).join(".rustcleaner_wipe_tmp");
-            assert!(!container.exists(), "Cleanup must occur regardless of wipe_mft setting");
+            assert!(!container.exists(), "Cleanup must occur regardless of algorithm setting");
         }
     }
 }
@@ -1083,7 +1083,6 @@ fn tier4_scenario_free_space_wiper_cancellation_and_leak_free_cleanup() {
             wiper::wipe_free_space(
                 &root_clone,
                 wiper::WipeAlgorithm::DodThreePass,
-                false,
                 Some(32),
                 prog_clone,
                 cancel_clone,

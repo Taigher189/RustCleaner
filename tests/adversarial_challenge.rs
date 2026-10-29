@@ -43,11 +43,9 @@ fn challenge_parallel_threads_calling_wipe_free_space_do_not_collide() {
         };
 
         let handle = std::thread::spawn(move || {
-            let wipe_mft = (i % 2) == 0;
             wiper::wipe_free_space(
                 &root,
                 algorithm,
-                wipe_mft,
                 Some(2), // 2 MB cap for fast parallel stress
                 progress,
                 cancel,
@@ -141,7 +139,6 @@ fn challenge_concurrent_cancellations_at_various_stages_unlink_all_temp_files() 
             let res = wiper::wipe_free_space(
                 &root,
                 wiper::WipeAlgorithm::DodThreePass,
-                true,
                 Some(64),
                 progress,
                 cancel_clone,
