@@ -790,8 +790,7 @@ mod tests {
 
         let backup_file = export_residual_reg_backup(&[item], &temp_dir).expect("backup generation");
         assert!(backup_file.exists());
-        let bytes = fs::read(&backup_file).expect("read backup");
-        let text = String::from_utf16_lossy(&bytes[2..].chunks_exact(2).map(|b| u16::from_le_bytes([b[0], b[1]])).collect::<Vec<_>>());
+        let text = fs::read_to_string(&backup_file).expect("read backup");
         assert!(text.contains("Windows Registry Editor Version 5.00"));
         assert!(text.contains("Software\\TestAppResidual"));
         let _ = fs::remove_dir_all(&temp_dir);

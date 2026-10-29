@@ -481,9 +481,7 @@ pub fn escape_reg_str(s: &str) -> String {
 
 /// Writes a Windows Registry Editor v5 file as UTF-16LE with a BOM, as expected by Regedit.
 pub fn write_reg_file(path: &Path, content: &str) -> Result<(), String> {
-    let mut bytes = vec![0xFF, 0xFE];
-    bytes.extend(content.encode_utf16().flat_map(u16::to_le_bytes));
-    fs::write(path, bytes).map_err(|e| format!("Errore nel salvataggio del backup .reg '{}': {e}", path.display()))
+    fs::write(path, content.as_bytes()).map_err(|e| format!("Errore nel salvataggio del backup .reg '{}': {e}", path.display()))
 }
 
 /// Exports the selected registry issues into a standard `Windows Registry Editor Version 5.00` `.reg` backup file
@@ -649,10 +647,6 @@ pub fn backup_and_fix_registry(
 mod tests {
     use super::*;
 
-    fn read_reg_file_for_test(path: &Path) -> String {
-        let bytes = fs::read(path).expect("read backup");
-        String::from_utf16_lossy(&bytes[2..].chunks_exact(2).map(|b| u16::from_le_bytes([b[0], b[1]])).collect::<Vec<_>>())
-    }
 
     #[test]
     fn test_extract_executable_path() {
@@ -706,7 +700,7 @@ mod tests {
             },
         };
         let path = export_reg_backup(&[issue1, issue2], &temp_dir).expect("backup should succeed");
-        let text = read_reg_file_for_test(&path);
+        let text = fs::read_to_string(&path).expect("read backup");
         assert!(text.starts_with("Windows Registry Editor Version 5.00"));
         assert!(text.contains(r#""C:\\Missing\\lib.dll"=dword:00000001"#));
         assert!(text.contains(r#"@="C:\\NonExistent\\app.exe""#));
@@ -730,7 +724,7 @@ mod tests {
             },
         };
         let path = export_reg_backup(&[issue], &temp_dir).expect("backup should succeed");
-        let text = read_reg_file_for_test(&path);
+        let text = fs::read_to_string(&path).expect("read backup");
         assert!(text.contains(r#""C:\\Windows\\Installer\\{GUID}\\"=dword:00000001"#));
         let _ = fs::remove_dir_all(&temp_dir);
     }
