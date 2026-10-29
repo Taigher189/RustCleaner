@@ -1,8 +1,4 @@
-//! Drive Wiper — Low-Level Free Space & MFT Slack Sanitizer
-//! Reconstructed from CCleaner64.exe `winsys.ini` ID=1030 (`[Wipe Free Space]`:
-//! `SpecialKey1=N_EX_WIPE_MFT_FREE_SPACE` @ 0x19e9fb8, `SpecialKey2=N_EX_WIPEFREESPACE` @ 0x19e9c70)
-//! and `.rdata` shredder engine strings (`WipeMFTFreeSpace` @ 0x1a0a608,
-//! `WipeFreeSpaceDrives` @ 0x1a0a6d0, `ShredFreespaceAlg` @ 0x1a60180, `ShredFreespaceNumpass` @ 0x1a601e0).
+//! Best-effort free-space overwrite using a temporary file in the target drive root.
 
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
@@ -115,17 +111,17 @@ pub struct WipeProgress {
     pub speed_mb_per_sec: f64,
     pub status_message: String,
     pub error: Option<String>,
-    pub container_dir: Option<PathBuf>,
+    pub temp_file_path: Option<PathBuf>,
 }
 
 /// RAII Guard that guarantees removal of the temporary wipe directory even on panic or early cancellation.
 struct WipeCleanupGuard {
-    dir_path: PathBuf,
+    path: PathBuf,
 }
 
 impl Drop for WipeCleanupGuard {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.dir_path);
+        let _ = fs::remove_file(&self.path);
     }
 }
 
@@ -219,33 +215,24 @@ pub fn validate_wipe_drive_root(drive_root: &str) -> Result<PathBuf, String> {
 
 /// Wipes unallocated disk space on `drive_root` (e.g. `"C:\\"`).
 /// - Uses `FILE_FLAG_WRITE_THROUGH` (`0x80000000`) to bypass the OS write cache and flush directly to storage.
-/// - Optionally wipes MFT free records (`wipe_mft_slack`), matching `N_EX_WIPE_MFT_FREE_SPACE`.
 /// - `max_megabytes`: if `Some(mb)`, caps the wiped space to `mb` MB (useful for safe/fast verification);
 ///   if `None`, wipes available free space leaving a 512 MB safety reserve so Windows never starves.
 pub fn wipe_free_space(
     drive_root: &str,
     algorithm: WipeAlgorithm,
-    wipe_mft_slack: bool,
     max_megabytes: Option<u64>,
     progress: Arc<Mutex<WipeProgress>>,
     cancel_flag: Arc<AtomicBool>,
 ) -> Result<u64, String> {
     let root_path = validate_wipe_drive_root(drive_root)?;
     let session_id = WIPER_SESSION_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let container_dir = root_path.join(format!(
+    let wipe_file_path = root_path.join(format!(
         "_rustcleaner_wipe_{}_{}.tmp",
         std::process::id(),
         session_id
     ));
-    fs::create_dir_all(&container_dir).map_err(|e| {
-        format!(
-            "Impossibile creare la cartella temporanea di bonifica in '{}': {e}",
-            container_dir.display()
-        )
-    })?;
-
     let _cleanup_guard = WipeCleanupGuard {
-        dir_path: container_dir.clone(),
+        path: wipe_file_path.clone(),
     };
 
     // Determine target byte count from free space
@@ -259,7 +246,9 @@ pub fn wipe_free_space(
     // Keep at least 512 MB safety margin for the OS
     let safe_free = free_space.saturating_sub(512 * 1024 * 1024);
     let target_bytes = match max_megabytes {
-        Some(mb) => (mb * 1024 * 1024).min(safe_free.max(16 * 1024 * 1024)),
+        Some(mb) => mb.checked_mul(1024 * 1024)
+            .ok_or_else(|| "Il limite in MB è troppo grande.".to_string())?
+            .min(safe_free),
         None => safe_free,
     };
 
@@ -278,7 +267,7 @@ pub fn wipe_free_space(
             p.target_bytes_per_pass = target_bytes;
             p.status_message = format!("Inizializzazione bonifica su {drive_root}...");
             p.error = None;
-            p.container_dir = Some(container_dir.clone());
+            p.temp_file_path = Some(wipe_file_path.clone());
         }
     }
 
@@ -292,44 +281,9 @@ pub fn wipe_free_space(
         return Ok(0);
     }
 
-    // Optional Phase 1: Wipe MFT Free Records (`N_EX_WIPE_MFT_FREE_SPACE` @ 0x19e9fb8)
-    if wipe_mft_slack {
-        {
-            if let Ok(mut p) = progress.lock() {
-                p.status_message =
-                    "Bonifica record MFT liberi (N_EX_WIPE_MFT_FREE_SPACE)...".to_string();
-            }
-        }
-        let mft_dir = container_dir.join("mft_slack");
-        let _ = fs::create_dir_all(&mft_dir);
-        let dummy_payload = [0u8; 768]; // Fits inside resident NTFS MFT record
-        for idx in 0..256u32 {
-            if cancel_flag.load(Ordering::Relaxed) {
-                break;
-            }
-            let fpath = mft_dir.join(format!("mft_slot_{idx:04x}.tmp"));
-            if let Ok(mut f) = fs::File::create(&fpath) {
-                let _ = f.write_all(&dummy_payload);
-            }
-        }
-        let _ = fs::remove_dir_all(&mft_dir);
-
-        if cancel_flag.load(Ordering::Relaxed) {
-            if let Ok(mut p) = progress.lock() {
-                p.running = false;
-                p.finished = true;
-                p.status_message =
-                    "Bonifica annullata dall'utente. Spazio temporaneo rilasciato.".to_string();
-            }
-            return Ok(0);
-        }
-    }
-
     // Phase 2: Low-level unallocated cluster wiping with 4 MB aligned buffer and FILE_FLAG_WRITE_THROUGH
     const CHUNK_SIZE: usize = 4 * 1024 * 1024; // 4 MB buffer
     let mut buffer = vec![0u8; CHUNK_SIZE];
-    let wipe_file_path = container_dir.join("_rustcleaner_wipe_stream.tmp");
-
     let mut file = OpenOptions::new()
         .create(true)
         .write(true)
@@ -381,10 +335,7 @@ pub fn wipe_free_space(
                     written_this_pass += n as u64;
                     total_written_all_passes += n as u64;
                 }
-                Err(_) => {
-                    // Disk full reached naturally when wiping 100% free space
-                    break;
-                }
+                Err(e) => return Err(format!("Errore durante la scrittura del file temporaneo di bonifica: {e}")),
             }
 
             let elapsed = start_time.elapsed().as_secs_f64().max(0.001);
@@ -409,11 +360,11 @@ pub fn wipe_free_space(
             break;
         }
 
-        let _ = file.sync_all();
+        file.sync_all().map_err(|e| format!("Errore nel flush del passaggio {}: {e}", pass_idx + 1))?;
     }
 
     drop(file);
-    let _ = fs::remove_file(&wipe_file_path);
+    fs::remove_file(&wipe_file_path).map_err(|e| format!("Impossibile eliminare il file temporaneo '{}': {e}", wipe_file_path.display()))?;
 
     if cancel_flag.load(Ordering::Relaxed) {
         if let Ok(mut p) = progress.lock() {
@@ -483,18 +434,17 @@ mod tests {
         let res = wipe_free_space(
             &first.root_path,
             WipeAlgorithm::SimpleOnePassZero,
-            false,
             Some(1),
             progress.clone(),
             cancel,
         );
 
         assert!(res.is_ok());
-        let created_container = progress.lock().ok().and_then(|p| p.container_dir.clone());
-        assert!(created_container.is_some(), "Container dir must be recorded in progress");
+        let created_container = progress.lock().ok().and_then(|p| p.temp_file_path.clone());
+        assert!(created_container.is_some(), "Temporary file path must be recorded in progress");
         assert!(
             !created_container.unwrap().exists(),
-            "temp wipe container must be cleanly unlinked upon cancellation"
+            "temporary wipe file must be cleanly unlinked upon cancellation"
         );
     }
 }

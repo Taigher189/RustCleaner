@@ -139,7 +139,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 viewport: eframe::egui::ViewportBuilder::default()
                     .with_inner_size([gui::DEFAULT_WINDOW_WIDTH, gui::DEFAULT_WINDOW_HEIGHT])
                     .with_min_inner_size([gui::MIN_WINDOW_WIDTH, gui::MIN_WINDOW_HEIGHT])
-                    .with_title("RustCleaner v1.4.1-alpha [MEGA ALPHA] — Zero-Telemetry Windows Optimizer"),
+                    .with_title(concat!("RustCleaner v", env!("CARGO_PKG_VERSION"), " — Zero-Telemetry Windows Optimizer")),
                 ..Default::default()
             };
             eframe::run_native(
@@ -262,7 +262,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let prog = Arc::new(Mutex::new(wiper::WipeProgress::default()));
             let cancel = Arc::new(AtomicBool::new(false));
             let written =
-                wiper::wipe_free_space(&drive, alg, true, Some(limit_mb), prog.clone(), cancel)?;
+                wiper::wipe_free_space(&drive, alg, Some(limit_mb), prog.clone(), cancel)?;
             let final_msg = prog
                 .lock()
                 .map(|p| p.status_message.clone())

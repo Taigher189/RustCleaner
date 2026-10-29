@@ -479,6 +479,13 @@ pub fn escape_reg_str(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+/// Writes a Windows Registry Editor v5 file as UTF-16LE with a BOM, as expected by Regedit.
+pub fn write_reg_file(path: &Path, content: &str) -> Result<(), String> {
+    let mut bytes = vec![0xFF, 0xFE];
+    bytes.extend(content.encode_utf16().flat_map(u16::to_le_bytes));
+    fs::write(path, bytes).map_err(|e| format!("Errore nel salvataggio del backup .reg '{}': {e}", path.display()))
+}
+
 /// Exports the selected registry issues into a standard `Windows Registry Editor Version 5.00` `.reg` backup file
 /// BEFORE any modification is made to the Windows Registry.
 pub fn export_reg_backup(issues: &[RegistryIssue], backup_dir: &Path) -> Result<PathBuf, String> {
@@ -525,20 +532,44 @@ pub fn export_reg_backup(issues: &[RegistryIssue], backup_dir: &Path) -> Result<
                     }
                 }
             }
-            RegTargetAction::DeleteSubkey { default_value } => {
-                if let Some(def) = default_value {
-                    content.push_str(&format!("@=\"{}\"\r\n\r\n", escape_reg_str(def)));
-                } else {
-                    content.push_str("\r\n");
-                }
+            RegTargetAction::DeleteSubkey { .. } => {
+                let root = issue.hive.open_root();
+                let key = root.open_subkey_with_flags(&issue.key_path, KEY_READ)
+                    .map_err(|e| format!("Impossibile leggere {} per il backup: {e}", issue.full_reg_path()))?;
+                append_reg_backup_subtree(&key, &format!("{}\\{}", issue.hive.prefix(), issue.key_path), &mut content)?;
             }
         }
     }
 
-    fs::write(&file_path, content.as_bytes())
-        .map_err(|e| format!("Errore nel salvataggio del backup .reg '{}': {e}", file_path.display()))?;
+    write_reg_file(&file_path, &content)?;
 
     Ok(file_path)
+}
+
+fn append_reg_backup_subtree(key: &RegKey, path: &str, content: &mut String) -> Result<(), String> {
+    content.push_str(&format!("[{path}]\r\n"));
+    for value_result in key.enum_values() {
+        let (name, value) = value_result.map_err(|e| format!("Impossibile enumerare valori registry: {e}"))?;
+        let escaped_name = if name.is_empty() { "@".to_string() } else { format!("\"{}\"", escape_reg_str(&name)) };
+        match value.vtype.clone() {
+            REG_SZ | REG_EXPAND_SZ => {
+                let kind = if value.vtype == REG_SZ { 1 } else { 2 };
+                content.push_str(&format!("{escaped_name}=hex({kind:x}):{}\r\n", value.bytes.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(",")));
+            }
+            REG_DWORD if value.bytes.len() >= 4 => {
+                let number = u32::from_le_bytes(value.bytes[..4].try_into().unwrap_or([0; 4]));
+                content.push_str(&format!("{escaped_name}=dword:{number:08x}\r\n"));
+            }
+            kind => content.push_str(&format!("{escaped_name}=hex({:x}):{}\r\n", kind as u32, value.bytes.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(","))),
+        }
+    }
+    content.push_str("\r\n");
+    for key_result in key.enum_keys() {
+        let child = key_result.map_err(|e| format!("Impossibile enumerare sottochiavi registry: {e}"))?;
+        let child_key = key.open_subkey_with_flags(&child, KEY_READ).map_err(|e| format!("Impossibile leggere sottochiave registry '{child}': {e}"))?;
+        append_reg_backup_subtree(&child_key, &format!("{path}\\{child}"), content)?;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -618,6 +649,11 @@ pub fn backup_and_fix_registry(
 mod tests {
     use super::*;
 
+    fn read_reg_file_for_test(path: &Path) -> String {
+        let bytes = fs::read(path).expect("read backup");
+        String::from_utf16_lossy(&bytes[2..].chunks_exact(2).map(|b| u16::from_le_bytes([b[0], b[1]])).collect::<Vec<_>>())
+    }
+
     #[test]
     fn test_extract_executable_path() {
         let p1 = extract_executable_path(r#""C:\Program Files\App\app.exe" --minimized"#).unwrap();
@@ -670,7 +706,7 @@ mod tests {
             },
         };
         let path = export_reg_backup(&[issue1, issue2], &temp_dir).expect("backup should succeed");
-        let text = fs::read_to_string(&path).expect("read backup");
+        let text = read_reg_file_for_test(&path);
         assert!(text.starts_with("Windows Registry Editor Version 5.00"));
         assert!(text.contains(r#""C:\\Missing\\lib.dll"=dword:00000001"#));
         assert!(text.contains(r#"@="C:\\NonExistent\\app.exe""#));
@@ -694,7 +730,7 @@ mod tests {
             },
         };
         let path = export_reg_backup(&[issue], &temp_dir).expect("backup should succeed");
-        let text = fs::read_to_string(&path).expect("read backup");
+        let text = read_reg_file_for_test(&path);
         assert!(text.contains(r#""C:\\Windows\\Installer\\{GUID}\\"=dword:00000001"#));
         let _ = fs::remove_dir_all(&temp_dir);
     }

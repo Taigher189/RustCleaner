@@ -260,7 +260,6 @@ pub struct RustCleanerApp {
     pub drives: Vec<DriveInfo>,
     pub selected_drive_idx: usize,
     pub wipe_algorithm: WipeAlgorithm,
-    pub wipe_mft_slack: bool,
     pub wipe_limit_mb_enabled: bool,
     pub wipe_limit_mb: u64,
     pub wipe_progress: Arc<Mutex<WipeProgress>>,
@@ -366,7 +365,6 @@ impl Default for RustCleanerApp {
             drives,
             selected_drive_idx: 0,
             wipe_algorithm: WipeAlgorithm::SimpleOnePassZero,
-            wipe_mft_slack: true,
             wipe_limit_mb_enabled: true,
             wipe_limit_mb: 64,
             wipe_progress: Arc::new(Mutex::new(WipeProgress::default())),
@@ -3757,12 +3755,12 @@ impl RustCleanerApp {
                             ui.add_space(40.0);
                             ui.spinner();
                             ui.add_space(10.0);
-                            ui.label(RichText::new("Scansione pacchetti AppX preinstallati in corso...").color(pal.text_secondary));
+                            ui.label(RichText::new(dec.appx_scanning).color(pal.text_secondary));
                         });
                     } else if !self.decrap_appx_scanned {
                         ui.vertical_centered(|ui| {
                             ui.add_space(40.0);
-                            ui.label(RichText::new("Scansione Bloatware AppX non ancora avviata.").size(15.0).strong().color(pal.text_primary));
+                            ui.label(RichText::new(dec.appx_not_scanned).size(15.0).strong().color(pal.text_primary));
                             ui.add_space(10.0);
                             if draw_action_button(
                                 ui,
@@ -3785,12 +3783,15 @@ impl RustCleanerApp {
                     } else if self.decrap_appx_packages.is_empty() {
                         ui.vertical_centered(|ui| {
                             ui.add_space(40.0);
-                            ui.label(RichText::new("Nessun bloatware AppX rilevato! Il sistema è pulito.").size(15.0).strong().color(pal.accent_emerald));
+                            ui.label(RichText::new(dec.appx_none_found).size(15.0).strong().color(pal.accent_emerald));
                         });
                     } else {
                         ui.horizontal(|ui| {
                             let selected_count = self.decrap_appx_packages.iter().filter(|p| p.selected).count();
-                            ui.label(RichText::new(format!("Pacchetti rilevati: {} (selezionati: {selected_count})", self.decrap_appx_packages.len())).strong().color(pal.text_primary));
+                            let count_label = dec.appx_count_label
+                                .replace("{total}", &self.decrap_appx_packages.len().to_string())
+                                .replace("{selected}", &selected_count.to_string());
+                            ui.label(RichText::new(count_label).strong().color(pal.text_primary));
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if draw_action_button(
                                     ui,
@@ -3810,9 +3811,11 @@ impl RustCleanerApp {
                                     }
                                     self.decrap_appx_packages.retain(|p| !p.selected);
                                     if errors.is_empty() {
-                                        self.decrap_status_msg = Some(format!("Disinstallati con successo {removed_count} pacchetti AppX bloatware!"));
+                                        self.decrap_status_msg = Some(dec.appx_removed_success.replace("{count}", &removed_count.to_string()));
                                     } else {
-                                        self.decrap_status_msg = Some(format!("Disinstallati {removed_count} pacchetti. Errori su alcuni pacchetti: {:?}", errors));
+                                        self.decrap_status_msg = Some(dec.appx_removed_errors
+                                            .replace("{count}", &removed_count.to_string())
+                                            .replace("{errors}", &errors.join("; ")));
                                     }
                                 }
                             });
@@ -4045,9 +4048,6 @@ impl RustCleanerApp {
                     ui.add_space(4.0);
                 }
 
-                ui.add_space(4.0);
-                ui.checkbox(&mut self.wipe_mft_slack, s.wiper_mft_checkbox);
-
                 ui.horizontal(|ui| {
                     ui.checkbox(&mut self.wipe_limit_mb_enabled, s.wiper_limit_checkbox);
                     if self.wipe_limit_mb_enabled {
@@ -4094,7 +4094,6 @@ impl RustCleanerApp {
                     if let Some(drive) = self.drives.get(self.selected_drive_idx) {
                         let drive_root = drive.root_path.clone();
                         let alg = self.wipe_algorithm;
-                        let mft = self.wipe_mft_slack;
                         let limit = if self.wipe_limit_mb_enabled {
                             Some(self.wipe_limit_mb)
                         } else {
@@ -4108,7 +4107,6 @@ impl RustCleanerApp {
                             if let Err(e) = wipe_free_space(
                                 &drive_root,
                                 alg,
-                                mft,
                                 limit,
                                 prog_arc.clone(),
                                 cancel_arc,

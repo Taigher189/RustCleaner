@@ -31,7 +31,7 @@
 Most traditional Windows maintenance tools (like CCleaner or commercial uninstallers) have become bloated: background telemetry daemons, persistent tray agents eating 100+ MB of RAM, bundled trialware, and upsell popups.
 
 **RustCleaner changes the game:**
-- 🛡️ **Zero Telemetry & 100% Offline**: No network tracking, no analytics, no cloud telemetry.
+- 🛡️ **Zero Telemetry**: No tracking or analytics. Network access is limited to the documented Microsoft Winget and Windows Update features when you use them.
 - ⚡ **Zero-RAM Footprint**: Leverages native Windows Task Scheduler (`schtasks.exe`) and Win32 `ReadDirectoryChangesW` kernel events. Consumes **0 MB RAM** when idle.
 - 📦 **Single Portable Executable (~7.4 MB)**: Statically linked CRT with native Win32/COM bindings. No installers, no runtimes, no dependencies.
 - 🔒 **Ironclad Safety First**: Every registry modification and leftover purge automatically exports an undo `.reg` backup before touching any key.
@@ -67,8 +67,8 @@ Reclaim your PC privacy and declutter Windows 11 in one click:
 - Mandatory `.reg` rollback export generated prior to any registry repair.
 
 ### 5. 💿 Low-Level Free Space Wiper
-- Sanitizes unallocated drive sectors to prevent forensic file recovery without harming your existing files or OS.
-- Supports **Zero Fill (1-pass)**, **DoD 5220.22-M (3-pass)**, **NSA (7-pass)**, and **Gutmann (35-pass)** algorithms with unbuffered direct disk I/O (`FILE_FLAG_WRITE_THROUGH`).
+- Writes selected overwrite passes to a dedicated temporary file in the root of the selected drive, leaving a 512 MB free-space reserve. The temporary file is removed after completion or cancellation.
+- Supports **Zero Fill (1-pass)**, **DoD-style (3-pass)**, **NSA-style (7-pass)**, and **Gutmann-style (35-pass)** patterns using `FILE_FLAG_WRITE_THROUGH`. This file-based approach is best-effort and cannot guarantee sanitization on SSDs, copy-on-write filesystems, or storage with remapping.
 
 ### 6. 🔄 Winget & Official Driver Updater
 - **Software Updates**: Queries official Microsoft Winget repositories (`winget upgrade`) with 1-click silent updates.
@@ -81,7 +81,7 @@ Reclaim your PC privacy and declutter Windows 11 in one click:
 | Feature / Metric | 🦀 **RustCleaner** | 🟠 **CCleaner** | 🔵 **Revo Uninstaller** | ⚪ **BleachBit** |
 | :--- | :---: | :---: | :---: | :---: |
 | **Idle Memory Consumption** | **0 MB** *(Task Scheduler)* | 80 – 150 MB *(Daemon)* | Manual Only | **0 MB** |
-| **Telemetry & Tracking** | 🚫 **Zero (100% Offline)** | ⚠️ Heavy (Avast analytics) | ⚠️ Moderate | 🚫 None |
+| **Telemetry & Tracking** | 🚫 **Zero telemetry** | ⚠️ Heavy (Avast analytics) | ⚠️ Moderate | 🚫 None |
 | **Distribution** | ⚡ **Single Portable .exe (~7 MB)** | Installer (~50 MB) | Multi-file Installer | Python + GTK (~20 MB) |
 | **Deep Residual Uninstaller** | ✅ **Included (Free)** | 🔒 Paid Pro Only | 🔒 Paid Pro ($25+) | ❌ No |
 | **Windows 11 Privacy & Decrapifier** | ✅ **Included (Free)** | ❌ No | ❌ No | ⚠️ Limited |

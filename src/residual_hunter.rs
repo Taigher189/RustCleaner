@@ -169,7 +169,8 @@ pub fn extract_search_tokens(name: &str, publisher: &str) -> Vec<String> {
 
 /// Checks if a filesystem path is a protected system directory that must not be deleted.
 pub fn is_protected_path(path: &Path) -> bool {
-    let path_str = path.to_string_lossy().to_lowercase();
+    let resolved = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let path_str = resolved.to_string_lossy().replace('/', "\\").to_lowercase();
     let norm = path_str.trim_end_matches(['\\', '/']);
 
     for blacklisted in CRITICAL_SYSTEM_PATH_BLACKLIST {
@@ -177,6 +178,12 @@ pub fn is_protected_path(path: &Path) -> bool {
             return true;
         }
     }
+
+    let windir = env::var("WINDIR").or_else(|_| env::var("SystemRoot")).unwrap_or_else(|_| r"C:\Windows".to_string()).replace('/', "\\").to_lowercase();
+    let pf = env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".to_string()).replace('/', "\\").to_lowercase();
+    let pf86 = env::var("ProgramFiles(x86)").unwrap_or_else(|_| r"C:\Program Files (x86)".to_string()).replace('/', "\\").to_lowercase();
+    let protected_subtrees = [windir.clone(), format!(r"{windir}\system32"), format!(r"{windir}\syswow64"), format!(r"{windir}\winsxs"), format!(r"{windir}\boot"), format!(r"{pf}\windows nt"), format!(r"{pf86}\windows nt"), r"c:\programdata\microsoft".to_string()];
+    if protected_subtrees.iter().any(|root| norm == root || norm.starts_with(&format!(r"{root}\"))) { return true; }
 
     // Root drive protections (e.g. "C:\")
     if norm.len() <= 3 && norm.ends_with(':') || norm.len() == 3 && norm.chars().nth(1) == Some(':') {
@@ -202,6 +209,11 @@ pub fn is_protected_path(path: &Path) -> bool {
         }
     }
 
+    let personal = ["documents", "desktop", "pictures", "music", "videos"];
+    if resolved.components().any(|component| personal.contains(&component.as_os_str().to_string_lossy().to_lowercase().as_str())) { return true; }
+    let existing = if resolved.exists() { resolved.as_path() } else { resolved.parent().unwrap_or(resolved.as_path()) };
+    if existing.ancestors().any(|ancestor| ancestor.join(".git").exists()) { return true; }
+    if resolved.is_dir() && WalkDir::new(&resolved).max_depth(4).into_iter().filter_map(Result::ok).any(|entry| entry.file_name() == ".git") { return true; }
     false
 }
 
@@ -600,8 +612,17 @@ pub fn export_residual_reg_backup(
     let mut has_entries = false;
     for item in items.iter().filter(|i| i.selected) {
         if let ResidualKind::RegistryKey { hive, sub_path } = &item.kind {
-            content.push_str(&format!("; Motivo: {}\r\n", item.reason));
-            content.push_str(&format!("; Percorso: {}\\{sub_path}\r\n\r\n", hive.label()));
+            let root = hive.open_root();
+            let key = root.open_subkey_with_flags(sub_path, KEY_READ).map_err(|e| format!("Impossibile leggere {}\\{sub_path} per il backup: {e}", hive.label()))?;
+            let reg_root = match hive { ResidualHive::Hkcu => "HKEY_CURRENT_USER", _ => "HKEY_LOCAL_MACHINE" };
+            append_reg_subtree(&key, &format!("{reg_root}\\{sub_path}"), &mut content)?;
+            has_entries = true;
+        } else if let ResidualKind::RegistryValue { hive, key_path, value_name } = &item.kind {
+            let root = hive.open_root();
+            let key = root.open_subkey_with_flags(key_path, KEY_READ).map_err(|e| format!("Impossibile leggere {}\\{key_path} per il backup: {e}", hive.label()))?;
+            let value = key.get_raw_value(value_name).map_err(|e| format!("Impossibile leggere il valore '{value_name}' per il backup: {e}"))?;
+            let reg_root = match hive { ResidualHive::Hkcu => "HKEY_CURRENT_USER", _ => "HKEY_LOCAL_MACHINE" };
+            content.push_str(&format!("[{reg_root}\\{key_path}]\r\n{}\r\n\r\n", format_reg_value(value_name, &value)));
             has_entries = true;
         }
     }
@@ -610,10 +631,36 @@ pub fn export_residual_reg_backup(
         content.push_str("; Nessuna chiave di registro selezionata per la rimozione.\r\n");
     }
 
-    fs::write(&file_path, content.as_bytes())
-        .map_err(|e| format!("Errore scrittura file backup .reg '{}': {e}", file_path.display()))?;
+    crate::registry::write_reg_file(&file_path, &content)?;
 
     Ok(file_path)
+}
+
+fn format_reg_value(name: &str, value: &winreg::RegValue) -> String {
+    let name = if name.is_empty() { "@".to_string() } else { format!("\"{}\"", name.replace('\\', "\\\\").replace('"', "\\\"")) };
+    match value.vtype.clone() {
+        REG_SZ | REG_EXPAND_SZ => {
+            let kind = if value.vtype == REG_SZ { 1 } else { 2 };
+            format!("{name}=hex({kind:x}):{}", value.bytes.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(","))
+        }
+        REG_DWORD if value.bytes.len() >= 4 => format!("{name}=dword:{:08x}", u32::from_le_bytes(value.bytes[..4].try_into().unwrap_or([0; 4]))),
+        kind => format!("{name}=hex({:x}):{}", kind as u32, value.bytes.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(",")),
+    }
+}
+
+fn append_reg_subtree(key: &RegKey, path: &str, content: &mut String) -> Result<(), String> {
+    content.push_str(&format!("[{path}]\r\n"));
+    for value_result in key.enum_values() {
+        let (name, value) = value_result.map_err(|e| format!("Impossibile enumerare valori registry: {e}"))?;
+        content.push_str(&format!("{}\r\n", format_reg_value(&name, &value)));
+    }
+    content.push_str("\r\n");
+    for key_result in key.enum_keys() {
+        let child = key_result.map_err(|e| format!("Impossibile enumerare sottochiavi registry: {e}"))?;
+        let child_key = key.open_subkey_with_flags(&child, KEY_READ).map_err(|e| format!("Impossibile leggere sottochiave registry '{child}': {e}"))?;
+        append_reg_subtree(&child_key, &format!("{path}\\{child}"), content)?;
+    }
+    Ok(())
 }
 
 /// Executes the deletion of all selected residual items with automated `.reg` backup.
@@ -628,7 +675,7 @@ pub fn delete_selected_residuals(
     if has_reg {
         match export_residual_reg_backup(items, backup_dir) {
             Ok(p) => report.reg_backup_path = Some(p),
-            Err(e) => report.errors.push(format!("Avviso backup registro: {e}")),
+            Err(e) => { report.errors.push(format!("Eliminazione annullata: backup registro non riuscito: {e}")); return report; }
         }
     }
 
@@ -688,6 +735,8 @@ pub fn delete_selected_residuals(
                             report.errors.push(format!("Impossibile eliminare valore {}\\{} -> {}: {e}", hive.label(), key_path, value_name));
                         }
                     }
+                } else {
+                    report.errors.push(format!("Impossibile aprire {}\\{} per eliminare il valore '{}'.", hive.label(), key_path, value_name));
                 }
             }
         }
@@ -722,6 +771,10 @@ mod tests {
     #[test]
     fn test_export_residual_reg_backup() {
         let temp_dir = env::temp_dir().join("rustcleaner_residual_test");
+        let root = RegKey::predef(HKEY_CURRENT_USER);
+        let (key, _) = root.create_subkey(r"Software\TestAppResidual").expect("create temporary registry test key");
+        key.set_value("Sample", &"Restorable").expect("create temporary registry test value");
+        drop(key);
         let item = ResidualItem {
             id: 1,
             kind: ResidualKind::RegistryKey {
@@ -737,9 +790,11 @@ mod tests {
 
         let backup_file = export_residual_reg_backup(&[item], &temp_dir).expect("backup generation");
         assert!(backup_file.exists());
-        let text = fs::read_to_string(&backup_file).expect("read backup");
+        let bytes = fs::read(&backup_file).expect("read backup");
+        let text = String::from_utf16_lossy(&bytes[2..].chunks_exact(2).map(|b| u16::from_le_bytes([b[0], b[1]])).collect::<Vec<_>>());
         assert!(text.contains("Windows Registry Editor Version 5.00"));
         assert!(text.contains("Software\\TestAppResidual"));
         let _ = fs::remove_dir_all(&temp_dir);
+        let _ = root.delete_subkey_all(r"Software\TestAppResidual");
     }
 }
