@@ -505,13 +505,13 @@ pub fn export_reg_backup(issues: &[RegistryIssue], backup_dir: &Path) -> Result<
             issue.problem_description,
             issue.category.code()
         ));
-        content.push_str(&format!("[{}\\{}]\r\n", issue.hive.prefix(), issue.key_path));
         match &issue.action {
             RegTargetAction::DeleteValue {
                 value_name,
                 original_data,
                 is_dword,
             } => {
+                content.push_str(&format!("[{}\\{}]\r\n", issue.hive.prefix(), issue.key_path));
                 let is_default_val = value_name.is_empty() || value_name == "@";
                 if *is_dword {
                     if is_default_val {
@@ -530,11 +530,18 @@ pub fn export_reg_backup(issues: &[RegistryIssue], backup_dir: &Path) -> Result<
                     }
                 }
             }
-            RegTargetAction::DeleteSubkey { .. } => {
+            RegTargetAction::DeleteSubkey { default_value } => {
                 let root = issue.hive.open_root();
-                let key = root.open_subkey_with_flags(&issue.key_path, KEY_READ)
-                    .map_err(|e| format!("Impossibile leggere {} per il backup: {e}", issue.full_reg_path()))?;
-                append_reg_backup_subtree(&key, &format!("{}\\{}", issue.hive.prefix(), issue.key_path), &mut content)?;
+                if let Ok(key) = root.open_subkey_with_flags(&issue.key_path, KEY_READ) {
+                    append_reg_backup_subtree(&key, &format!("{}\\{}", issue.hive.prefix(), issue.key_path), &mut content)?;
+                } else {
+                    content.push_str(&format!("[{}\\{}]\r\n", issue.hive.prefix(), issue.key_path));
+                    if let Some(val) = default_value {
+                        let escaped_val = escape_reg_str(val);
+                        content.push_str(&format!("@=\"{escaped_val}\"\r\n"));
+                    }
+                    content.push_str("\r\n");
+                }
             }
         }
     }
