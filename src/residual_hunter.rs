@@ -171,9 +171,9 @@ pub fn extract_search_tokens(name: &str, publisher: &str) -> Vec<String> {
 pub fn is_protected_path(path: &Path) -> bool {
     let resolved = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let mut path_str = resolved.to_string_lossy().replace('/', "\\").to_lowercase();
-    if let Some(stripped) = path_str.strip_prefix(r"\\?\unc\\") {
-        path_str = format!("\\\\{}", stripped);
-    } else if let Some(stripped) = path_str.strip_prefix(r"\\?\\") {
+    if let Some(stripped) = path_str.strip_prefix(r#"\\?\unc\"#) {
+        path_str = format!(r#"\\{stripped}"#);
+    } else if let Some(stripped) = path_str.strip_prefix(r#"\\?\"#) {
         path_str = stripped.to_string();
     }
     let norm = path_str.trim_end_matches(['\\', '/']);
