@@ -170,7 +170,12 @@ pub fn extract_search_tokens(name: &str, publisher: &str) -> Vec<String> {
 /// Checks if a filesystem path is a protected system directory that must not be deleted.
 pub fn is_protected_path(path: &Path) -> bool {
     let resolved = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    let path_str = resolved.to_string_lossy().replace('/', "\\").to_lowercase();
+    let mut path_str = resolved.to_string_lossy().replace('/', "\\").to_lowercase();
+    if let Some(stripped) = path_str.strip_prefix(r"\\?\unc\\") {
+        path_str = format!("\\\\{}", stripped);
+    } else if let Some(stripped) = path_str.strip_prefix(r"\\?\\") {
+        path_str = stripped.to_string();
+    }
     let norm = path_str.trim_end_matches(['\\', '/']);
 
     for blacklisted in CRITICAL_SYSTEM_PATH_BLACKLIST {
